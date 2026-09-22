@@ -20,6 +20,8 @@ _cache = {
     "timestamp": None,
     "initiators": None,
     "initiators_timestamp": None,
+    "lists": None,
+    "lists_timestamp": None,
 }
 
 
@@ -84,60 +86,112 @@ def load_google_sheet(use_cache: bool = True) -> pd.DataFrame:
         raise
 
 
-def load_initiators_from_team(use_cache: bool = True) -> List[str]:
-    """
-    Загружает список инициаторов из листа Team, колонка A.
+def _extract_unique(values: list) -> list:
+    """Извлекает уникальные непустые значения из списка, пропуская заголовок."""
+    cleaned = [
+        v.strip()
+        for v in values[1:]  # Пропускаем заголовок (первую строку)
+        if v and v.strip()
+    ]
+    return list(dict.fromkeys(cleaned))
 
-    Args:
-        use_cache: Использовать ли кэш
+
+# Маппинг заголовков колонок листа Team на ключи списков
+_TEAM_COLUMN_MAP = {
+    "инициатор": "initiators",
+    "объект": "objects",
+    "ед. изм": "units",
+    "единица": "units",
+    "наименование": "names",
+    "статус": "statuses",
+}
+
+# Значения по умолчанию, если лист Team недоступен
+_TEAM_DEFAULTS = {
+    "initiators": ["Иван", "Петр", "Анна", "Другое"],
+    "objects": ["Солнечное", "Привилегия", "Не указан"],
+    "units": ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"],
+}
+
+
+def load_lists_from_team(use_cache: bool = True) -> dict:
+    """
+    Загружает все списки из листа Team.
+    Каждая колонка = отдельный список. Заголовок первой строки определяет тип.
 
     Returns:
-        Список уникальных инициаторов
+        Словарь {ключ: [значения]}, например:
+        {"initiators": ["Иван", ...], "objects": ["Солнечное", ...], "units": ["шт", ...]}
     """
+    cache_key = "lists"
+    ts_key = "lists_timestamp"
+
     now = datetime.now()
 
-    # Проверяем кэш
-    if use_cache and _cache["initiators"] is not None and _cache["initiators_timestamp"]:
-        age = (now - _cache["initiators_timestamp"]).total_seconds()
+    if use_cache and _cache[cache_key] is not None and _cache[ts_key]:
+        age = (now - _cache[ts_key]).total_seconds()
         if age < CACHE_TTL:
-            logger.info(f"Используем кэш инициаторов (возраст: {age:.0f}с)")
-            return _cache["initiators"].copy()
+            logger.info(f"Используем кэш списков Team (возраст: {age:.0f}с)")
+            return _cache[cache_key].copy()
 
-    # Загружаем свежие данные
-    logger.info("Загрузка инициаторов из листа Team...")
+    logger.info("Загрузка списков из листа Team...")
     try:
         client = _get_google_client()
         sheet = client.open_by_key(GOOGLE_SHEET_ID)
-        worksheet = sheet.worksheet("Team")  # ✅ Лист Team
+        worksheet = sheet.worksheet("Team")
 
-        # Получаем все значения из колонки A
-        values = worksheet.col_values(1)  # Колонка A = индекс 1
+        all_values = worksheet.get_all_values()
+        if not all_values or len(all_values) < 2:
+            logger.warning("Лист Team пуст или содержит только заголовки")
+            return _TEAM_DEFAULTS.copy()
 
-        # Удаляем заголовок (первую строку) и пустые значения
-        initiators = [
-            v.strip()
-            for v in values[1:]  # Пропускаем заголовок
-            if v and v.strip()  # Убираем пустые
-        ]
+        headers = all_values[0]
+        result = {}
 
-        # Убираем дубликаты, сохраняя порядок
-        unique_initiators = list(dict.fromkeys(initiators))
+        for col_idx, header in enumerate(headers):
+            header_lower = header.strip().lower()
+            # Определяем ключ по заголовку
+            list_key = None
+            for pattern, key in _TEAM_COLUMN_MAP.items():
+                if pattern in header_lower:
+                    list_key = key
+                    break
 
-        # Добавляем опцию "Другое" в конец
-        if "Другое" not in unique_initiators:
-            unique_initiators.append("Другое")
+            if not list_key:
+                continue
 
-        # Обновляем кэш
-        _cache["initiators"] = unique_initiators.copy()
-        _cache["initiators_timestamp"] = now
+            # Собираем значения колонки
+            col_values = [row[col_idx] if col_idx < len(row) else "" for row in all_values]
+            unique = _extract_unique(col_values)
 
-        logger.info(f"Загружено {len(unique_initiators)} инициаторов: {unique_initiators}")
-        return unique_initiators
+            if unique:
+                result[list_key] = unique
+                logger.info(f"  {header} → {list_key}: {len(unique)} значений")
+
+        # Добавляем "Другое" в инициаторы, если его нет
+        if "initiators" in result and "Другое" not in result["initiators"]:
+            result["initiators"].append("Другое")
+
+        # Заполняем пропущенные ключи значениями по умолчанию
+        for key, default in _TEAM_DEFAULTS.items():
+            if key not in result:
+                result[key] = default
+                logger.info(f"  {key}: используется значение по умолчанию")
+
+        _cache[cache_key] = result.copy()
+        _cache[ts_key] = now
+
+        return result
 
     except Exception as e:
-        logger.error(f"Ошибка загрузки инициаторов: {e}")
-        # Возвращаем значения по умолчанию
-        return ["Иван", "Петр", "Анна", "Другое"]
+        logger.error(f"Ошибка загрузки списков из Team: {e}")
+        return _TEAM_DEFAULTS.copy()
+
+
+def load_initiators_from_team(use_cache: bool = True) -> List[str]:
+    """Загружает список инициаторов из листа Team (обёртка над load_lists_from_team)."""
+    lists = load_lists_from_team(use_cache=use_cache)
+    return lists.get("initiators", _TEAM_DEFAULTS["initiators"])
 
 
 def add_row(values: list) -> bool:
@@ -175,4 +229,6 @@ def clear_cache():
     _cache["timestamp"] = None
     _cache["initiators"] = None
     _cache["initiators_timestamp"] = None
+    _cache["lists"] = None
+    _cache["lists_timestamp"] = None
     logger.info("Кэш полностью очищен")

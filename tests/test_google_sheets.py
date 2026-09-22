@@ -21,6 +21,8 @@ def reset_cache():
         "timestamp": None,
         "initiators": None,
         "initiators_timestamp": None,
+        "lists": None,
+        "lists_timestamp": None,
     }
     google_sheets._client_cache = None
     yield
@@ -188,9 +190,15 @@ def test_add_row_error_propagates(mock_get_client):
 
 @patch("google_sheets._get_google_client")
 def test_load_initiators(mock_get_client):
-    """Загружает инициаторов из колонки A листа Team"""
+    """Загружает инициаторов из листа Team"""
     mock_ws = MagicMock()
-    mock_ws.col_values.return_value = ["Имя", "Иван", "Петр", "Анна", "Иван"]
+    mock_ws.get_all_values.return_value = [
+        ["Инициатор", "Объект"],
+        ["Иван", "Солнечное"],
+        ["Петр", "Привилегия"],
+        ["Анна", "Солнечное"],
+        ["Иван", ""],
+    ]
     mock_sheet = MagicMock()
     mock_sheet.worksheet.return_value = mock_ws
     mock_client = MagicMock()
@@ -213,7 +221,10 @@ def test_load_initiators(mock_get_client):
 def test_load_initiators_uses_cache(mock_get_client):
     """Повторный вызов использует кэш"""
     mock_ws = MagicMock()
-    mock_ws.col_values.return_value = ["Имя", "Иван"]
+    mock_ws.get_all_values.return_value = [
+        ["Инициатор"],
+        ["Иван"],
+    ]
     mock_sheet = MagicMock()
     mock_sheet.worksheet.return_value = mock_ws
     mock_client = MagicMock()

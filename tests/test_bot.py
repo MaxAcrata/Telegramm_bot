@@ -141,7 +141,7 @@ async def test_set_quantity_invalid():
 
 
 @pytest.mark.asyncio
-@patch("bot.load_initiators_from_team", return_value=["Иван", "Петр", "Другое"])
+@patch("bot.load_lists_from_team", return_value={"initiators": ["Иван", "Петр", "Другое"], "units": ["шт", "кг"], "objects": ["Объект1"]})
 async def test_set_unit(mock_load):
     update = make_update(text="шт")
     context = make_context()
@@ -154,7 +154,7 @@ async def test_set_unit(mock_load):
 
 
 @pytest.mark.asyncio
-@patch("bot.load_initiators_from_team", side_effect=Exception("error"))
+@patch("bot.load_lists_from_team", side_effect=Exception("error"))
 async def test_set_unit_fallback(mock_load):
     update = make_update(text="кг")
     context = make_context()

@@ -103,6 +103,7 @@ def test_format_task_html():
         "unit": "ед. изм",
         "request_date": "дата заявки",
         "object": "объект",
+        "initiator": "инициатор",
         "notes": "примечания",
     }
 
@@ -112,6 +113,7 @@ def test_format_task_html():
         "ед. изм": "шт",
         "дата заявки": datetime(2023, 1, 1).date(),
         "объект": "Стройка А",
+        "инициатор": "Иван",
         "примечания": "срочно",
     })
 
@@ -121,6 +123,7 @@ def test_format_task_html():
     assert "<b>Кирпич</b>" in result
     assert "1000 шт" in result
     assert "Стройка А" in result
+    assert "Иван" in result
 
 
 def test_build_report_empty():

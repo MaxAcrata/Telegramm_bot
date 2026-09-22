@@ -16,10 +16,9 @@ from config import (
     ADMIN_IDS,
     REPORT_HOUR,
     REPORT_MINUTE,
-    UNITS,
 )
-from core import analyze_google_sheet, get_unique_values
-from google_sheets import add_row, clear_cache, load_initiators_from_team  # ✅ Добавлен импорт
+from core import analyze_google_sheet
+from google_sheets import add_row, clear_cache, load_lists_from_team
 from utils import validate_quantity, split_message
 
 logger = logging.getLogger(__name__)
@@ -162,7 +161,13 @@ async def set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['quantity'] = qty
 
-    keyboard = [UNITS[i:i + 3] for i in range(0, len(UNITS), 3)]
+    try:
+        lists = load_lists_from_team()
+        units = lists.get("units", ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"])
+    except Exception:
+        units = ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"]
+
+    keyboard = [units[i:i + 3] for i in range(0, len(units), 3)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
         "📏 <b>Шаг 3/6:</b> Выберите единицу измерения:",
@@ -176,12 +181,12 @@ async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет единицу измерения и запрашивает инициатора"""
     context.user_data['unit'] = update.message.text.strip()
 
-    # ✅ Загружаем инициаторов из листа Team
     try:
-        initiators = load_initiators_from_team()
+        lists = load_lists_from_team()
+        initiators = lists.get("initiators", ["Иван", "Петр", "Анна", "Другое"])
     except Exception as e:
-        logger.error(f"Ошибка загрузки инициаторов: {e}")
-        initiators = ["Иван", "Петр", "Анна", "Другое"]  # Fallback
+        logger.error(f"Ошибка загрузки списков: {e}")
+        initiators = ["Иван", "Петр", "Анна", "Другое"]
 
     keyboard = [initiators[i:i + 2] for i in range(0, len(initiators), 2)]
     keyboard.append(["❌ Отмена"])
@@ -207,9 +212,10 @@ async def set_initiator(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data['initiator'] = initiator
 
-    # Загружаем объекты
-    objects = get_unique_values("object")
-    if not objects:
+    try:
+        lists = load_lists_from_team()
+        objects = lists.get("objects", ["Солнечное", "Привилегия", "Не указан"])
+    except Exception:
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
     keyboard = [objects[i:i + 2] for i in range(0, len(objects), 2)]
@@ -226,8 +232,10 @@ async def set_initiator_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     """Сохраняет кастомное имя инициатора и переходит к объектам"""
     context.user_data['initiator'] = update.message.text.strip()
 
-    objects = get_unique_values("object")
-    if not objects:
+    try:
+        lists = load_lists_from_team()
+        objects = lists.get("objects", ["Солнечное", "Привилегия", "Не указан"])
+    except Exception:
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
     keyboard = [objects[i:i + 2] for i in range(0, len(objects), 2)]

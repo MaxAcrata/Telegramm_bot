@@ -82,6 +82,7 @@ def format_task_html(row: pd.Series, cols: dict, today: datetime) -> str:
     qty = str(row.get(cols["quantity"], "")).strip()
     unit = str(row.get(cols["unit"], "")).strip()
     obj = str(row.get(cols["object"], "Не указан")).strip()
+    initiator = str(row.get(cols["initiator"], "Не указан")).strip()
     req_date = row.get(cols["request_date"])
     notes = str(row.get(cols["notes"], "")).strip().lower()
 
@@ -104,6 +105,7 @@ def format_task_html(row: pd.Series, cols: dict, today: datetime) -> str:
     lines = [
         f"{status_emoji} <b>{name}</b>",
         f"   └ Кол-во: <code>{qty_text}</code>",
+        f"   └ Инициатор: {initiator}",
         f"   └ Объект: {obj}",
         f"   └ Заявка: {date_text}",
     ]
@@ -160,6 +162,22 @@ def build_report_html(active_tasks: pd.DataFrame, cols: dict) -> str:
         for _, task in group.iterrows():
             report.append(format_task_html(task, cols, today))
         report.append("")
+
+    # Раздел просроченных заявок по инициаторам
+    if not overdue.empty:
+        report.extend([
+            "",
+            " <b>⚠️ ПРОСРОЧЕННЫЕ ЗАЯВКИ</b>",
+            "━━━━━━━━━━━━━━━━━━━━",
+        ])
+        for initiator, group in overdue.groupby(cols["initiator"]):
+            report.append(f"\n 👤 <b>{initiator}</b> — {len(group)} шт.")
+            for _, task in group.iterrows():
+                name = str(task.get(cols["name"], "—")).strip()
+                obj = str(task.get(cols["object"], "—")).strip()
+                req_date = task.get(cols["request_date"])
+                days = (today - req_date).days if req_date else 0
+                report.append(f"    • {name} ({obj}) — {days} дн.")
 
     return "\n".join(report)
 
