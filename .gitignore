@@ -32,6 +32,11 @@ ENV/
 htmlcov/
 .tox/
 
+# === База данных ===
+*.db
+*.db-journal
+*.db-wal
+
 # === Генерируемые файлы ===
 report.txt
 *.log

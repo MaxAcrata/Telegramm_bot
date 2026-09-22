@@ -1,90 +1,23 @@
 import logging
-from datetime import datetime, timedelta
-import pandas as pd
+from datetime import datetime, timedelta, date
 
-from config import COLUMN_MAPPING, OVERDUE_DAYS, REPORT_FILE_NAME
-from google_sheets import load_google_sheet
-from utils import parse_date, format_date
+from config import OVERDUE_DAYS, REPORT_FILE_NAME
+from db import get_active_requests
 
 logger = logging.getLogger(__name__)
 
 
-def clean_column_names(df: pd.DataFrame) -> pd.DataFrame:
-    """Приводит названия колонок к единому виду"""
-    df.columns = (
-        df.columns
-        .astype(str)
-        .str.strip()
-        .str.lower()
-        .str.replace(r"[\n\r]+", " ", regex=True)
-    )
-    return df
-
-
-def map_columns(df: pd.DataFrame) -> dict:
-    """
-    Сопоставляет колонки таблицы с внутренними ключами.
-
-    Raises:
-        ValueError: Если не удалось найти обязательную колонку
-    """
-    normalized_columns = {str(col).strip(): col for col in df.columns}
-    result = {}
-
-    for key, variants in COLUMN_MAPPING.items():
-        found = None
-        for variant in variants:
-            variant_lower = variant.lower().strip()
-            for norm_name, orig_name in normalized_columns.items():
-                if variant_lower in norm_name:
-                    found = orig_name
-                    break
-            if found:
-                break
-
-        if not found:
-            raise ValueError(
-                f"Не найдена колонка для '{key}'. "
-                f"Доступные: {list(df.columns)}"
-            )
-        result[key] = found
-
-    return result
-
-
-def get_active_tasks(df: pd.DataFrame, cols: dict) -> pd.DataFrame:
-    """
-    Фильтрует активные задачи (без даты выполнения).
-
-    Args:
-        df: Исходный DataFrame
-        cols: Маппинг колонок
-
-    Returns:
-        DataFrame только с активными задачами
-    """
-    # Парсим даты
-    df[cols["request_date"]] = df[cols["request_date"]].apply(parse_date)
-    df[cols["done_date"]] = df[cols["done_date"]].apply(parse_date)
-
-    # Фильтруем
-    active = df[
-        df[cols["done_date"]].isna() &
-        df[cols["request_date"]].notna()
-        ]
-
-    return active
-
-
-def format_task_html(row: pd.Series, cols: dict, today: datetime) -> str:
+def format_task_html(task: dict, today: date) -> str:
     """Форматирует одну задачу в HTML для Telegram"""
-    name = str(row.get(cols["name"], "Без названия")).strip()
-    qty = str(row.get(cols["quantity"], "")).strip()
-    unit = str(row.get(cols["unit"], "")).strip()
-    obj = str(row.get(cols["object"], "Не указан")).strip()
-    initiator = str(row.get(cols["initiator"], "Не указан")).strip()
-    req_date = row.get(cols["request_date"])
-    notes = str(row.get(cols["notes"], "")).strip().lower()
+    name = task.get("name", "Без названия")
+    qty = task.get("quantity")
+    unit = task.get("unit", "")
+    obj = task.get("object", "Не указан")
+    initiator = task.get("initiator", "Не указан")
+    notes = (task.get("notes") or "").lower()
+
+    req_date_str = task.get("request_date", "")
+    req_date = date.fromisoformat(req_date_str) if req_date_str else None
 
     # Статус
     is_ordered = "заказ" in notes
@@ -100,7 +33,7 @@ def format_task_html(row: pd.Series, cols: dict, today: datetime) -> str:
         status_emoji = "⚪"
 
     qty_text = f"{qty} {unit}".strip() if qty else "—"
-    date_text = format_date(req_date)
+    date_text = req_date.strftime("%d.%m.%Y") if req_date else "нет даты"
 
     lines = [
         f"{status_emoji} <b>{name}</b>",
@@ -116,18 +49,10 @@ def format_task_html(row: pd.Series, cols: dict, today: datetime) -> str:
     return "\n".join(lines)
 
 
-def build_report_html(active_tasks: pd.DataFrame, cols: dict) -> str:
-    """
-    Генерирует HTML-отчёт для Telegram.
-
-    Args:
-        active_tasks: DataFrame с активными задачами
-        cols: Маппинг колонок
-
-    Returns:
-        Отформатированный HTML-текст отчёта
-    """
-    today = datetime.today().date()
+def build_report(save_to_file: bool = True) -> str:
+    """Генерирует HTML-отчёт по активным заявкам."""
+    today = date.today()
+    active_tasks = get_active_requests()
 
     report = [
         "<b> СВОДКА ПО АКТИВНЫМ ЗАЯВКАМ</b>",
@@ -136,125 +61,69 @@ def build_report_html(active_tasks: pd.DataFrame, cols: dict) -> str:
         "━━━━━━━━━━━━━━━━━━━━",
     ]
 
-    if active_tasks.empty:
+    if not active_tasks:
         report.append("✅ На данный момент активных заявок нет.")
-        return "\n".join(report)
+        result = "\n".join(report)
+        if save_to_file:
+            _save_report(result)
+        return result
 
     # Статистика
-    notes = active_tasks[cols["notes"]].fillna("").astype(str).str.lower()
-    ordered = active_tasks[notes.str.contains("заказ", na=False)]
-    not_ordered = active_tasks[~notes.str.contains("заказ", na=False)]
-    overdue = active_tasks[
-        active_tasks[cols["request_date"]] < today - timedelta(days=OVERDUE_DAYS)
-        ]
+    ordered = [t for t in active_tasks if "заказ" in (t.get("notes") or "").lower()]
+    overdue = [
+        t for t in active_tasks
+        if t.get("request_date")
+        and date.fromisoformat(t["request_date"]) < today - timedelta(days=OVERDUE_DAYS)
+    ]
 
     report.extend([
         f" Заказано: <b>{len(ordered)}</b>",
-        f" Не заказано: <b>{len(not_ordered)}</b>",
+        f" Не заказано: <b>{len(active_tasks) - len(ordered)}</b>",
         f" Просрочено (&gt;{OVERDUE_DAYS} дн.): <b>{len(overdue)}</b>",
         "━━━━━━━━━━━━━━━━━━━━",
         ""
     ])
 
     # Группировка по объектам
-    for obj, group in active_tasks.groupby(cols["object"]):
+    from itertools import groupby
+    sorted_tasks = sorted(active_tasks, key=lambda t: t.get("object", ""))
+    for obj, group_iter in groupby(sorted_tasks, key=lambda t: t.get("object", "")):
+        group = list(group_iter)
         report.append(f"\n <b>Объект: {obj}</b>")
-        for _, task in group.iterrows():
-            report.append(format_task_html(task, cols, today))
+        for task in group:
+            report.append(format_task_html(task, today))
         report.append("")
 
     # Раздел просроченных заявок по инициаторам
-    if not overdue.empty:
+    if overdue:
         report.extend([
             "",
             " <b>⚠️ ПРОСРОЧЕННЫЕ ЗАЯВКИ</b>",
             "━━━━━━━━━━━━━━━━━━━━",
         ])
-        for initiator, group in overdue.groupby(cols["initiator"]):
+        sorted_overdue = sorted(overdue, key=lambda t: t.get("initiator", ""))
+        for initiator, group_iter in groupby(sorted_overdue, key=lambda t: t.get("initiator", "")):
+            group = list(group_iter)
             report.append(f"\n 👤 <b>{initiator}</b> — {len(group)} шт.")
-            for _, task in group.iterrows():
-                name = str(task.get(cols["name"], "—")).strip()
-                obj = str(task.get(cols["object"], "—")).strip()
-                req_date = task.get(cols["request_date"])
+            for task in group:
+                name = task.get("name", "—")
+                obj = task.get("object", "—")
+                req_date_str = task.get("request_date", "")
+                req_date = date.fromisoformat(req_date_str) if req_date_str else None
                 days = (today - req_date).days if req_date else 0
                 report.append(f"    • {name} ({obj}) — {days} дн.")
 
-    return "\n".join(report)
+    result = "\n".join(report)
+    if save_to_file:
+        _save_report(result)
+    logger.info("Отчёт сформирован")
+    return result
 
 
-def analyze_google_sheet(save_to_file: bool = True) -> str:
-    """
-    Главная функция анализа.
-
-    Args:
-        save_to_file: Сохранять ли отчёт в файл
-
-    Returns:
-        HTML-отчёт
-    """
+def _save_report(text: str):
+    """Сохраняет отчёт в файл."""
     try:
-        logger.info("Запуск анализа Google таблицы...")
-
-        # Загружаем и чистим данные
-        df = load_google_sheet()
-        df = clean_column_names(df).dropna(how="all")
-        cols = map_columns(df)
-
-        # Получаем активные задачи
-        active_tasks = get_active_tasks(df, cols)
-
-        # Формируем отчёт
-        result = build_report_html(active_tasks, cols)
-
-        # Сохраняем в файл (опционально)
-        if save_to_file:
-            with open(REPORT_FILE_NAME, "w", encoding="utf-8") as f:
-                f.write(result)
-
-        logger.info("Анализ завершён успешно")
-        return result
-
+        with open(REPORT_FILE_NAME, "w", encoding="utf-8") as f:
+            f.write(text)
     except Exception as e:
-        logger.error(f"Ошибка при анализе таблицы: {e}", exc_info=True)
-        raise
-
-
-def get_unique_values(column_key: str) -> list:
-    """
-    Получает уникальные значения из колонки.
-
-    Args:
-        column_key: Ключ колонки из COLUMN_MAPPING
-
-    Returns:
-        Список уникальных непустых значений
-    """
-    try:
-        df = load_google_sheet()
-        df = clean_column_names(df)
-        cols = map_columns(df)
-
-        if column_key not in cols:
-            logger.warning(f"Ключ '{column_key}' не найден")
-            return []
-
-        col_name = cols[column_key]
-        values = (
-            df[col_name]
-            .dropna()
-            .astype(str)
-            .str.strip()
-            .tolist()
-        )
-
-        # Фильтруем пустые и служебные значения
-        unique = list(dict.fromkeys(
-            v for v in values
-            if v and v.lower() not in ("nan", "none", "")
-        ))
-
-        return unique
-
-    except Exception as e:
-        logger.warning(f"Ошибка загрузки колонки '{column_key}': {e}")
-        return []
+        logger.warning(f"Не удалось сохранить отчёт: {e}")

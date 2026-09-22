@@ -17,8 +17,8 @@ from config import (
     REPORT_HOUR,
     REPORT_MINUTE,
 )
-from core import analyze_google_sheet
-from google_sheets import add_row, clear_cache, load_lists_from_team
+from core import build_report
+from db import init_db, get_all_lists, add_request
 from utils import validate_quantity, split_message
 
 logger = logging.getLogger(__name__)
@@ -42,7 +42,7 @@ def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     """Возвращает главную клавиатуру в зависимости от прав"""
     if is_admin(user_id):
         keyboard = [
-            ["📊 Анализ", "🔄 Обновить кэш"],
+            ["📊 Анализ"],
             ["➕ Добавить заявку"],
             ["⛔ Выход"]
         ]
@@ -94,27 +94,17 @@ async def run_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Запускаю анализ...")
 
     try:
-        result = analyze_google_sheet()
+        result = build_report()
         await send_long_message(context, update.effective_chat.id, result, parse_mode='HTML')
     except Exception as e:
         await update.message.reply_text(f"❌ Ошибка анализа:\n<code>{e}</code>", parse_mode='HTML')
-
-
-async def refresh_cache(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Очищает кэш принудительно"""
-    if not is_admin(update.effective_user.id):
-        await update.message.reply_text("⛔ У вас нет прав для этой команды.")
-        return
-
-    clear_cache()
-    await update.message.reply_text("✅ Кэш очищен. Следующий запрос загрузит свежие данные.")
 
 
 async def scheduled_report(context: ContextTypes.DEFAULT_TYPE):
     """Автоматический ежедневный отчёт"""
     chat_id = context.job.chat_id
     try:
-        result = analyze_google_sheet()
+        result = build_report()
         await send_long_message(context, chat_id, result, parse_mode='HTML')
     except Exception as e:
         await context.bot.send_message(
@@ -162,8 +152,8 @@ async def set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['quantity'] = qty
 
     try:
-        lists = load_lists_from_team()
-        units = lists.get("units", ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"])
+        lists = get_all_lists()
+        units = lists.get("unit", ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"])
     except Exception:
         units = ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"]
 
@@ -182,8 +172,8 @@ async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['unit'] = update.message.text.strip()
 
     try:
-        lists = load_lists_from_team()
-        initiators = lists.get("initiators", ["Иван", "Петр", "Анна", "Другое"])
+        lists = get_all_lists()
+        initiators = lists.get("initiator", ["Иван", "Петр", "Анна", "Другое"])
     except Exception as e:
         logger.error(f"Ошибка загрузки списков: {e}")
         initiators = ["Иван", "Петр", "Анна", "Другое"]
@@ -213,8 +203,8 @@ async def set_initiator(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['initiator'] = initiator
 
     try:
-        lists = load_lists_from_team()
-        objects = lists.get("objects", ["Солнечное", "Привилегия", "Не указан"])
+        lists = get_all_lists()
+        objects = lists.get("object", ["Солнечное", "Привилегия", "Не указан"])
     except Exception:
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
@@ -233,8 +223,8 @@ async def set_initiator_custom(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data['initiator'] = update.message.text.strip()
 
     try:
-        lists = load_lists_from_team()
-        objects = lists.get("objects", ["Солнечное", "Привилегия", "Не указан"])
+        lists = get_all_lists()
+        objects = lists.get("object", ["Солнечное", "Привилегия", "Не указан"])
     except Exception:
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
@@ -301,21 +291,19 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return ConversationHandler.END
 
     # Сохраняем заявку
-    today = datetime.now().strftime("%d.%m.%Y")
-    row_data = [
-        context.user_data['name'],
-        context.user_data['quantity'],
-        context.user_data['unit'],
-        today,
-        "",
-        context.user_data['initiator'],
-        "",
-        context.user_data['object'],
-        context.user_data['notes'],
-    ]
+    from datetime import date
+    today = date.today()
 
     try:
-        add_row(row_data)
+        add_request(
+            name=context.user_data['name'],
+            quantity=float(context.user_data['quantity']),
+            unit=context.user_data['unit'],
+            request_date=today,
+            initiator=context.user_data['initiator'],
+            object_name=context.user_data['object'],
+            notes=context.user_data['notes'],
+        )
 
         summary = (
             "✅ <b>Заявка успешно добавлена!</b>\n\n"
@@ -364,9 +352,6 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "📊 Анализ":
         await run_analysis(update, context)
 
-    elif text == "🔄 Обновить кэш":
-        await refresh_cache(update, context)
-
     elif text == "⛔ Выход":
         await update.message.reply_text(
             "👋 До встречи! Для возврата введите /start",
@@ -383,6 +368,7 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ===== ГЛАВНАЯ ФУНКЦИЯ =====
 def main():
     """Точка входа"""
+    init_db()
     app = ApplicationBuilder().token(TELEGRAM_BOT_TOKEN).build()
 
     conv_handler = ConversationHandler(
