@@ -1,19 +1,20 @@
 import logging
 from datetime import datetime, timedelta, date
+from html import escape
 
 from config import OVERDUE_DAYS, REPORT_FILE_NAME
-from db import get_active_requests
+from db import get_active_requests, get_completed_requests
 
 logger = logging.getLogger(__name__)
 
 
 def format_task_html(task: dict, today: date) -> str:
     """Форматирует одну задачу в HTML для Telegram"""
-    name = task.get("name", "Без названия")
+    name = escape(task.get("name", "Без названия"))
     qty = task.get("quantity")
-    unit = task.get("unit", "")
-    obj = task.get("object", "Не указан")
-    initiator = task.get("initiator", "Не указан")
+    unit = escape(task.get("unit", ""))
+    obj = escape(task.get("object", "Не указан"))
+    initiator = escape(task.get("initiator", "Не указан"))
     notes = (task.get("notes") or "").lower()
 
     req_date_str = task.get("request_date", "")
@@ -49,9 +50,60 @@ def format_task_html(task: dict, today: date) -> str:
     return "\n".join(lines)
 
 
-def build_report(save_to_file: bool = True) -> str:
-    """Генерирует HTML-отчёт по активным заявкам."""
+def build_report(save_to_file: bool = True, mode: str = "active") -> str:
+    """Генерирует HTML-отчёт. mode: 'active' или 'completed'."""
     today = date.today()
+
+    if mode == "completed":
+        return _build_completed_report(today, save_to_file)
+
+    return _build_active_report(today, save_to_file)
+
+
+def _build_completed_report(today: date, save_to_file: bool) -> str:
+    """Отчёт по выполненным заявкам."""
+    tasks = get_completed_requests()
+
+    report = [
+        "<b>✅ ВЫПОЛНЕННЫЕ ЗАЯВКИ</b>",
+        f"📅 Дата: {today.strftime('%d.%m.%Y')}",
+        f"📊 Всего: <b>{len(tasks)}</b>",
+        "━━━━━━━━━━━━━━━━━━━━",
+    ]
+
+    if not tasks:
+        report.append("Нет выполненных заявок.")
+        result = "\n".join(report)
+        if save_to_file:
+            _save_report(result)
+        return result
+
+    for task in tasks:
+        name = escape(task.get("name", "—"))
+        qty = task.get("quantity")
+        unit = escape(task.get("unit", ""))
+        obj = escape(task.get("object", "—"))
+        initiator = escape(task.get("initiator", "—"))
+        done_str = task.get("done_date", "")
+        done_date = date.fromisoformat(done_str) if done_str else None
+        done_text = done_date.strftime("%d.%m.%Y") if done_date else "—"
+        qty_text = f"{qty} {unit}".strip() if qty else "—"
+
+        report.append(f"✅ <b>{name}</b>")
+        report.append(f"   └ Кол-во: <code>{qty_text}</code>")
+        report.append(f"   └ Инициатор: {initiator}")
+        report.append(f"   └ Объект: {obj}")
+        report.append(f"   └ Выполнено: {done_text}")
+        report.append("")
+
+    result = "\n".join(report)
+    if save_to_file:
+        _save_report(result)
+    return result
+
+
+def _build_active_report(today: date, save_to_file: bool) -> str:
+    """Отчёт по активным заявкам."""
     active_tasks = get_active_requests()
 
     report = [
@@ -89,7 +141,7 @@ def build_report(save_to_file: bool = True) -> str:
     sorted_tasks = sorted(active_tasks, key=lambda t: t.get("object", ""))
     for obj, group_iter in groupby(sorted_tasks, key=lambda t: t.get("object", "")):
         group = list(group_iter)
-        report.append(f"\n <b>Объект: {obj}</b>")
+        report.append(f"\n <b>Объект: {escape(obj)}</b>")
         for task in group:
             report.append(format_task_html(task, today))
         report.append("")
@@ -104,10 +156,10 @@ def build_report(save_to_file: bool = True) -> str:
         sorted_overdue = sorted(overdue, key=lambda t: t.get("initiator", ""))
         for initiator, group_iter in groupby(sorted_overdue, key=lambda t: t.get("initiator", "")):
             group = list(group_iter)
-            report.append(f"\n 👤 <b>{initiator}</b> — {len(group)} шт.")
+            report.append(f"\n 👤 <b>{escape(initiator)}</b> — {len(group)} шт.")
             for task in group:
-                name = task.get("name", "—")
-                obj = task.get("object", "—")
+                name = escape(task.get("name", "—"))
+                obj = escape(task.get("object", "—"))
                 req_date_str = task.get("request_date", "")
                 req_date = date.fromisoformat(req_date_str) if req_date_str else None
                 days = (today - req_date).days if req_date else 0

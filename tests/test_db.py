@@ -89,7 +89,7 @@ def test_get_all_lists():
     """Справочники возвращаются корректно"""
     lists = get_all_lists()
     assert isinstance(lists, dict)
-    assert "Иван" in lists["initiator"]
+    assert "Алексей" in lists["initiator"]
     assert "шт" in lists["unit"]
 
 

@@ -31,13 +31,31 @@ CREATE TABLE IF NOT EXISTS requests (
     notes TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS initiator_users (
+    initiator_name TEXT PRIMARY KEY,
+    telegram_id INTEGER NOT NULL,
+    object_name TEXT DEFAULT ''
+);
+
 CREATE INDEX IF NOT EXISTS idx_requests_active ON requests(done_date, request_date);
 CREATE INDEX IF NOT EXISTS idx_requests_object ON requests(object);
 """
 
+# Значения настроек по умолчанию
+_DEFAULT_SETTINGS = {
+    "buttons_per_row_object": "2",
+    "buttons_per_row_initiator": "4",
+    "buttons_per_row_unit": "3",
+}
+
 # Значения по умолчанию для справочников
 _DEFAULT_LISTS = {
-    "initiator": ["Иван", "Петр", "Анна"],
+    "initiator": ["Алексей", "Анатолий", "Михаил", "Игорь"],
     "object": ["Солнечное", "Привилегия"],
     "unit": ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"],
 }
@@ -72,6 +90,13 @@ def init_db():
                     "INSERT OR IGNORE INTO lists (list_type, value, sort_order) VALUES (?, ?, ?)",
                     (list_type, value, i),
                 )
+
+        # Заполняем настройки по умолчанию
+        for key, value in _DEFAULT_SETTINGS.items():
+            conn.execute(
+                "INSERT OR IGNORE INTO settings (key, value) VALUES (?, ?)",
+                (key, value),
+            )
     logger.info(f"БД инициализирована: {DB_PATH}")
 
 
@@ -130,6 +155,10 @@ def get_all_lists() -> Dict[str, List[str]]:
     if "initiator" in result and "Другое" not in result["initiator"]:
         result["initiator"].append("Другое")
 
+    # Добавляем "Другое" в объекты
+    if "object" in result and "Другое" not in result["object"]:
+        result["object"].append("Другое")
+
     # Заполняем пропущенные типы значениями по умолчанию
     for lt, defaults in _DEFAULT_LISTS.items():
         if lt not in result:
@@ -153,3 +182,129 @@ def add_list_value(list_type: str, value: str) -> bool:
             return True
         except sqlite3.IntegrityError:
             return False
+
+
+def rename_list_value(list_type: str, old_value: str, new_value: str) -> bool:
+    """Переименовывает значение в справочнике. Возвращает True если успешно."""
+    with get_conn() as conn:
+        try:
+            conn.execute(
+                "UPDATE lists SET value = ? WHERE list_type = ? AND value = ?",
+                (new_value, list_type, old_value),
+            )
+            return conn.total_changes > 0
+        except sqlite3.IntegrityError:
+            return False
+
+
+def delete_list_value(list_type: str, value: str) -> bool:
+    """Удаляет значение из справочника. Возвращает True если удалено."""
+    with get_conn() as conn:
+        conn.execute(
+            "DELETE FROM lists WHERE list_type = ? AND value = ?",
+            (list_type, value),
+        )
+        return conn.total_changes > 0
+
+
+def get_setting(key: str, default: str = "") -> str:
+    """Возвращает значение настройки."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = ?", (key,)
+            ).fetchone()
+        return row["value"] if row else default
+    except Exception:
+        return default
+
+
+def set_setting(key: str, value: str):
+    """Устанавливает значение настройки."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?, ?)",
+            (key, value),
+        )
+
+
+def complete_request(request_id: int, done_date: date) -> Optional[dict]:
+    """Отмечает заявку как выполненную. Возвращает данные заявки или None."""
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT * FROM requests WHERE id = ?", (request_id,)
+        ).fetchone()
+        if not row:
+            return None
+        conn.execute(
+            "UPDATE requests SET done_date = ? WHERE id = ?",
+            (done_date.isoformat(), request_id),
+        )
+    result = dict(row)
+    result["done_date"] = done_date.isoformat()
+    logger.info(f"Заявка #{request_id} завершена")
+    return result
+
+
+def get_completed_requests(limit: int = 50) -> List[dict]:
+    """Возвращает завершённые заявки (есть done_date), отсортированные по дате завершения."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, name, quantity, unit, request_date, done_date,
+                      initiator, status, object, notes
+               FROM requests
+               WHERE done_date IS NOT NULL
+               ORDER BY done_date DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+# ===== Привязка инициаторов к Telegram =====
+
+def link_initiator(initiator_name: str, telegram_id: int):
+    """Привязывает инициатора к Telegram-ID."""
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO initiator_users (initiator_name, telegram_id)
+               VALUES (?, ?)
+               ON CONFLICT(initiator_name) DO UPDATE SET telegram_id = excluded.telegram_id""",
+            (initiator_name, telegram_id),
+        )
+    logger.info(f"Инициатор «{initiator_name}» привязан к tg_id={telegram_id}")
+
+
+def get_initiator_tg_id(initiator_name: str) -> Optional[int]:
+    """Возвращает telegram_id инициатора или None."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT telegram_id FROM initiator_users WHERE initiator_name = ?",
+                (initiator_name,),
+            ).fetchone()
+        return row["telegram_id"] if row else None
+    except Exception:
+        return None
+
+
+def get_initiator_by_tg_id(telegram_id: int) -> Optional[str]:
+    """Возвращает имя инициатора по telegram_id или None."""
+    try:
+        with get_conn() as conn:
+            row = conn.execute(
+                "SELECT initiator_name FROM initiator_users WHERE telegram_id = ?",
+                (telegram_id,),
+            ).fetchone()
+        return row["initiator_name"] if row else None
+    except Exception:
+        return None
+
+
+def get_all_initiator_links() -> Dict[str, int]:
+    """Возвращает все привязки {имя: telegram_id}."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT initiator_name, telegram_id FROM initiator_users"
+        ).fetchall()
+    return {row["initiator_name"]: row["telegram_id"] for row in rows}

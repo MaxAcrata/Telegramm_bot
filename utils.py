@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import datetime
 from typing import Optional
 
@@ -38,10 +39,10 @@ def format_date(value) -> str:
 
 
 def validate_quantity(value: str) -> bool:
-    """Проверяет, что количество - число"""
+    """Проверяет, что количество - положительное конечное число"""
     try:
-        float(value.replace(",", "."))
-        return True
+        num = float(value.replace(",", "."))
+        return num > 0 and math.isfinite(num)
     except ValueError:
         return False
 
