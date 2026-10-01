@@ -1,4 +1,5 @@
 import logging
+import re
 from datetime import datetime, timedelta, date
 from html import escape
 
@@ -6,6 +7,46 @@ from config import OVERDUE_DAYS, REPORT_FILE_NAME
 from db import get_active_requests, get_completed_requests
 
 logger = logging.getLogger(__name__)
+
+# Регулярное выражение для поиска URLs
+_URL_PATTERN = re.compile(
+    r'https?://[^\s<>"\')\]]+|'  # http:// или https://
+    r'www\.[^\s<>"\')\]]+'       # www.
+)
+
+
+def make_links_clickable(text: str) -> str:
+    """Преобразует ссылки в тексте в кликабельные HTML-ссылки для Telegram.
+
+    Остальной текст экранируется для безопасности (защита от XSS).
+    """
+    if not text:
+        return ""
+
+    parts = []
+    last_end = 0
+
+    for match in _URL_PATTERN.finditer(text):
+        start, end = match.span()
+        url = match.group(0)
+
+        # Экранируем текст до ссылки
+        if start > last_end:
+            parts.append(escape(text[last_end:start]))
+
+        # Создаём кликабельную ссылку
+        href = url
+        if url.startswith("www."):
+            href = "https://" + url
+        parts.append(f'<a href="{escape(href)}">{escape(url)}</a>')
+
+        last_end = end
+
+    # Экранируем оставшийся текст
+    if last_end < len(text):
+        parts.append(escape(text[last_end:]))
+
+    return "".join(parts)
 
 
 def format_task_html(task: dict, today: date) -> str:
@@ -15,13 +56,14 @@ def format_task_html(task: dict, today: date) -> str:
     unit = escape(task.get("unit", ""))
     obj = escape(task.get("object", "Не указан"))
     initiator = escape(task.get("initiator", "Не указан"))
-    notes = (task.get("notes") or "").lower()
+    notes_raw = task.get("notes") or ""
+    notes_lower = notes_raw.lower()
 
     req_date_str = task.get("request_date", "")
     req_date = date.fromisoformat(req_date_str) if req_date_str else None
 
     # Статус
-    is_ordered = "заказ" in notes
+    is_ordered = "заказ" in notes_lower
     days_elapsed = (today - req_date).days if req_date else 0
     is_overdue = days_elapsed > OVERDUE_DAYS
 
@@ -43,6 +85,11 @@ def format_task_html(task: dict, today: date) -> str:
         f"   └ Объект: {obj}",
         f"   └ Заявка: {date_text}",
     ]
+
+    # Добавляем примечание, если оно есть
+    if notes_raw and notes_raw != "-":
+        notes_html = make_links_clickable(notes_raw)
+        lines.append(f"   └ Примечание: {notes_html}")
 
     if is_overdue:
         lines.append(f"   └ ⚠️ Просрочено на {days_elapsed} дн.")
@@ -88,12 +135,19 @@ def _build_completed_report(today: date, save_to_file: bool) -> str:
         done_date = date.fromisoformat(done_str) if done_str else None
         done_text = done_date.strftime("%d.%m.%Y") if done_date else "—"
         qty_text = f"{qty} {unit}".strip() if qty else "—"
+        notes_raw = task.get("notes") or ""
 
         report.append(f"✅ <b>{name}</b>")
         report.append(f"   └ Кол-во: <code>{qty_text}</code>")
         report.append(f"   └ Инициатор: {initiator}")
         report.append(f"   └ Объект: {obj}")
         report.append(f"   └ Выполнено: {done_text}")
+
+        # Добавляем примечание, если оно есть
+        if notes_raw and notes_raw != "-":
+            notes_html = make_links_clickable(notes_raw)
+            report.append(f"   └ Примечание: {notes_html}")
+
         report.append("")
 
     result = "\n".join(report)
@@ -160,10 +214,14 @@ def _build_active_report(today: date, save_to_file: bool) -> str:
             for task in group:
                 name = escape(task.get("name", "—"))
                 obj = escape(task.get("object", "—"))
+                notes_raw = task.get("notes") or ""
                 req_date_str = task.get("request_date", "")
                 req_date = date.fromisoformat(req_date_str) if req_date_str else None
                 days = (today - req_date).days if req_date else 0
                 report.append(f"    • {name} ({obj}) — {days} дн.")
+                if notes_raw and notes_raw != "-":
+                    notes_html = make_links_clickable(notes_raw)
+                    report.append(f"      Примечание: {notes_html}")
 
     result = "\n".join(report)
     if save_to_file:

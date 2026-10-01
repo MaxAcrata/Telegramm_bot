@@ -3,7 +3,48 @@ import pytest
 from datetime import date
 from unittest.mock import patch
 
-from core import format_task_html, build_report
+from core import format_task_html, build_report, make_links_clickable
+
+
+def test_make_links_clickable_http():
+    """Тест обработки HTTP ссылок"""
+    text = "Смотрите тут: https://example.com/page?id=123"
+    result = make_links_clickable(text)
+
+    assert '<a href="https://example.com/page?id=123">' in result
+    assert "Смотрите тут:" in result
+
+
+def test_make_links_clickable_www():
+    """Тест обработки www ссылок"""
+    text = "Сайт: www.example.com"
+    result = make_links_clickable(text)
+
+    assert '<a href="https://www.example.com">' in result
+    assert "Сайт:" in result
+
+
+def test_make_links_clickable_multiple():
+    """Тест обработки нескольких ссылок"""
+    text = "Документы: https://docs.google.com и https://yandex.ru"
+    result = make_links_clickable(text)
+
+    assert result.count('<a href') == 2
+
+
+def test_make_links_clickable_no_links():
+    """Тест без ссылок"""
+    text = "Просто текст без ссылок"
+    result = make_links_clickable(text)
+
+    assert result == "Просто текст без ссылок"
+    assert "<a href" not in result
+
+
+def test_make_links_clickable_empty():
+    """Тест с пустым текстом"""
+    result = make_links_clickable("")
+    assert result == ""
 
 
 def test_format_task_html():
@@ -26,6 +67,8 @@ def test_format_task_html():
     assert "Стройка А" in result
     assert "Иван" in result
     assert "01.01.2023" in result
+    assert "Примечание:" in result
+    assert "срочно" in result
 
 
 def test_format_task_html_overdue():
@@ -63,6 +106,43 @@ def test_format_task_html_ordered():
     result = format_task_html(task, today)
 
     assert "🟡" in result
+
+
+def test_format_task_html_with_link():
+    """Тест отображения ссылки в примечании"""
+    task = {
+        "name": "Материал",
+        "quantity": 10.0,
+        "unit": "шт",
+        "request_date": "2023-01-01",
+        "object": "Объект",
+        "initiator": "Иван",
+        "notes": "Ссылка: https://example.com/catalog",
+    }
+
+    today = date(2023, 1, 5)
+    result = format_task_html(task, today)
+
+    assert "Примечание:" in result
+    assert '<a href="https://example.com/catalog">' in result
+
+
+def test_format_task_html_notes_dash():
+    """Тест что прочерк не отображается как примечание"""
+    task = {
+        "name": "Материал",
+        "quantity": 10.0,
+        "unit": "шт",
+        "request_date": "2023-01-01",
+        "object": "Объект",
+        "initiator": "Иван",
+        "notes": "-",
+    }
+
+    today = date(2023, 1, 5)
+    result = format_task_html(task, today)
+
+    assert "Примечание:" not in result
 
 
 @patch("core.get_active_requests")
@@ -116,3 +196,21 @@ def test_build_report_overdue_section(mock_get):
 
     assert "ПРОСРОЧЕННЫЕ ЗАЯВКИ" in report
     assert "Иван" in report
+
+
+@patch("core.get_active_requests")
+def test_build_report_with_links(mock_get):
+    """Отчёт с ссылками в примечаниях"""
+    mock_get.return_value = [
+        {
+            "name": "Материал", "quantity": 10.0, "unit": "шт",
+            "request_date": "2023-01-01", "object": "Объект",
+            "initiator": "Иван", "notes": "Каталог: https://example.com",
+            "done_date": None, "status": "", "id": 1,
+        },
+    ]
+
+    report = build_report(save_to_file=False)
+
+    assert "Примечание:" in report
+    assert '<a href="https://example.com">' in report
