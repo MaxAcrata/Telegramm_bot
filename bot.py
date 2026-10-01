@@ -46,6 +46,7 @@ from db import (
     add_request_photo,
     get_request_photos,
     get_photo_counts,
+    clear_all_requests,
 )
 from utils import validate_quantity, split_message
 
@@ -80,7 +81,8 @@ REG_NAME = 90
     ADMIN_DELETE,
     ADMIN_ADD_VALUE,
     ADMIN_BUTTONS_EDIT,
-) = range(100, 107)
+    ADMIN_CLEAR_DB_CONFIRM,
+) = range(100, 108)
 
 # ===== КЛАВИАТУРА ОТМЕНЫ =====
 CANCEL_KEYBOARD = ReplyKeyboardMarkup(
@@ -841,6 +843,7 @@ async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("👤 Исполнители", callback_data="list:initiator")],
         [InlineKeyboardButton("📏 Единицы измерения", callback_data="list:unit")],
         [InlineKeyboardButton("🔢 Кнопок в строке", callback_data="buttons")],
+        [InlineKeyboardButton("🗑 Очистить БД", callback_data="clear_db")],
     ]
     await update.message.reply_text(
         "⚙️ <b>Настройки</b>\n\nВыберите раздел:",
@@ -857,6 +860,7 @@ async def _show_main_settings(query):
         [InlineKeyboardButton("👤 Исполнители", callback_data="list:initiator")],
         [InlineKeyboardButton("📏 Единицы измерения", callback_data="list:unit")],
         [InlineKeyboardButton("🔢 Кнопок в строке", callback_data="buttons")],
+        [InlineKeyboardButton("🗑 Очистить БД", callback_data="clear_db")],
     ]
     await query.edit_message_text(
         "⚙️ <b>Настройки</b>\n\nВыберите раздел:",
@@ -876,6 +880,9 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     if data == "buttons":
         return await admin_buttons_show(update, context)
+
+    if data == "clear_db":
+        return await admin_clear_db_confirm(update, context)
 
     if data == "back_main":
         return await _show_main_settings(query)
@@ -1149,6 +1156,49 @@ async def _show_list_msg(
     return ADMIN_LIST_VIEW
 
 
+async def admin_clear_db_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Показывает подтверждение очистки БД"""
+    query = update.callback_query
+    await query.answer()
+
+    keyboard = [
+        [
+            InlineKeyboardButton("✅ Да, очистить", callback_data="clear_db:confirm"),
+            InlineKeyboardButton("❌ Отмена", callback_data="clear_db:cancel"),
+        ],
+    ]
+    await query.edit_message_text(
+        "⚠️ <b>Очистка базы данных</b>\n\n"
+        "Будут удалены <b>все заявки</b> и прикреплённые фото.\n"
+        "Справочники (инициаторы, объекты, единицы) сохранятся.\n\n"
+        "Это действие <b>необратимо</b>. Продолжить?",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="HTML",
+    )
+    return ADMIN_CLEAR_DB_CONFIRM
+
+
+async def admin_clear_db_execute(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Выполняет или отменяет очистку БД"""
+    if not is_admin(update.effective_user.id):
+        return ConversationHandler.END
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+
+    if data == "clear_db:cancel":
+        await query.edit_message_text("❌ Очистка отменена.")
+        return await _show_main_settings(query)
+
+    # data == "clear_db:confirm"
+    count = clear_all_requests()
+    await query.edit_message_text(
+        f"✅ База данных очищена.\nУдалено заявок: <b>{count}</b>",
+        parse_mode="HTML",
+    )
+    return ConversationHandler.END
+
+
 async def admin_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Выход из админ-панели"""
     context.user_data.clear()
@@ -1244,6 +1294,11 @@ def main():
                 MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_value_handler)
             ],
             ADMIN_BUTTONS_EDIT: [CallbackQueryHandler(admin_buttons_edit_handler)],
+            ADMIN_CLEAR_DB_CONFIRM: [
+                CallbackQueryHandler(
+                    admin_clear_db_execute, pattern=r"^clear_db:(confirm|cancel)$"
+                )
+            ],
         },
         fallbacks=[
             CommandHandler("cancel", admin_cancel),

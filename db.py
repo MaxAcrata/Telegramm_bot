@@ -179,6 +179,16 @@ def add_request_with_photos(
     return row_id
 
 
+def clear_all_requests():
+    """Удаляет все заявки и связанные фото. Возвращает количество удалённых заявок."""
+    with get_conn() as conn:
+        count = conn.execute("SELECT COUNT(*) FROM requests").fetchone()[0]
+        conn.execute("DELETE FROM request_photos")
+        conn.execute("DELETE FROM requests")
+    logger.warning(f"Очищена БД: удалено {count} заявок")
+    return count
+
+
 def get_active_requests() -> List[dict]:
     """Возвращает активные заявки (без done_date), отсортированные по объекту."""
     with get_conn() as conn:
