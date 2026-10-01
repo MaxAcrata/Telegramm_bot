@@ -145,19 +145,59 @@ def test_format_task_html_notes_dash():
     assert "Примечание:" not in result
 
 
+def test_format_task_html_with_photo_count():
+    """Тест отображения количества фото"""
+    task = {
+        "name": "Материал",
+        "quantity": 10.0,
+        "unit": "шт",
+        "request_date": "2023-01-01",
+        "object": "Объект",
+        "initiator": "Иван",
+        "notes": "",
+    }
+
+    today = date(2023, 1, 5)
+    result = format_task_html(task, today, photo_count=3)
+
+    assert "📎 Фото: 3 шт." in result
+
+
+def test_format_task_html_no_photo_count():
+    """Тест что при photo_count=0 метка не показывается"""
+    task = {
+        "name": "Материал",
+        "quantity": 10.0,
+        "unit": "шт",
+        "request_date": "2023-01-01",
+        "object": "Объект",
+        "initiator": "Иван",
+        "notes": "",
+    }
+
+    today = date(2023, 1, 5)
+    result = format_task_html(task, today, photo_count=0)
+
+    assert "📎 Фото" not in result
+
+
+@patch("core.get_photo_counts")
 @patch("core.get_active_requests")
-def test_build_report_empty(mock_get):
+def test_build_report_empty(mock_get, mock_photos):
     """Пустой отчёт"""
     mock_get.return_value = []
+    mock_photos.return_value = {}
 
-    report = build_report(save_to_file=False)
+    report, ids = build_report(save_to_file=False)
 
     assert "активных заявок нет" in report
     assert "Всего активных: <b>0</b>" in report
+    assert ids == []
 
 
+@patch("core.get_photo_counts")
 @patch("core.get_active_requests")
-def test_build_report_with_tasks(mock_get):
+def test_build_report_with_tasks(mock_get, mock_photos):
     """Отчёт с задачами"""
     mock_get.return_value = [
         {
@@ -171,8 +211,9 @@ def test_build_report_with_tasks(mock_get):
             "initiator": "Петр", "notes": "заказ", "done_date": None, "status": "", "id": 2,
         },
     ]
+    mock_photos.return_value = {}
 
-    report = build_report(save_to_file=False)
+    report, ids = build_report(save_to_file=False)
 
     assert "Всего активных: <b>2</b>" in report
     assert "Заказано: <b>1</b>" in report
@@ -181,8 +222,9 @@ def test_build_report_with_tasks(mock_get):
     assert "Цемент" in report
 
 
+@patch("core.get_photo_counts")
 @patch("core.get_active_requests")
-def test_build_report_overdue_section(mock_get):
+def test_build_report_overdue_section(mock_get, mock_photos):
     """Раздел просроченных заявок по инициаторам"""
     mock_get.return_value = [
         {
@@ -191,15 +233,17 @@ def test_build_report_overdue_section(mock_get):
             "initiator": "Иван", "notes": "", "done_date": None, "status": "", "id": 1,
         },
     ]
+    mock_photos.return_value = {}
 
-    report = build_report(save_to_file=False)
+    report, ids = build_report(save_to_file=False)
 
     assert "ПРОСРОЧЕННЫЕ ЗАЯВКИ" in report
     assert "Иван" in report
 
 
+@patch("core.get_photo_counts")
 @patch("core.get_active_requests")
-def test_build_report_with_links(mock_get):
+def test_build_report_with_links(mock_get, mock_photos):
     """Отчёт с ссылками в примечаниях"""
     mock_get.return_value = [
         {
@@ -209,8 +253,36 @@ def test_build_report_with_links(mock_get):
             "done_date": None, "status": "", "id": 1,
         },
     ]
+    mock_photos.return_value = {}
 
-    report = build_report(save_to_file=False)
+    report, ids = build_report(save_to_file=False)
 
     assert "Примечание:" in report
     assert '<a href="https://example.com">' in report
+
+
+@patch("core.get_photo_counts")
+@patch("core.get_active_requests")
+def test_build_report_photo_ids(mock_get, mock_photos):
+    """Отчёт возвращает ID заявок с фото"""
+    mock_get.return_value = [
+        {
+            "name": "Материал", "quantity": 10.0, "unit": "шт",
+            "request_date": "2023-01-01", "object": "Объект",
+            "initiator": "Иван", "notes": "",
+            "done_date": None, "status": "", "id": 1,
+        },
+        {
+            "name": "Цемент", "quantity": 50.0, "unit": "кг",
+            "request_date": "2023-01-01", "object": "Объект",
+            "initiator": "Петр", "notes": "",
+            "done_date": None, "status": "", "id": 2,
+        },
+    ]
+    mock_photos.return_value = {1: 3}
+
+    report, ids = build_report(save_to_file=False)
+
+    assert 1 in ids
+    assert 2 not in ids
+    assert "📎 Фото: 3 шт." in report

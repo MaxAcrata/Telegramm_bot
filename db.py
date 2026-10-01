@@ -42,8 +42,16 @@ CREATE TABLE IF NOT EXISTS initiator_users (
     object_name TEXT DEFAULT ''
 );
 
+CREATE TABLE IF NOT EXISTS request_photos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    request_id INTEGER NOT NULL REFERENCES requests(id),
+    file_id TEXT NOT NULL,
+    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+);
+
 CREATE INDEX IF NOT EXISTS idx_requests_active ON requests(done_date, request_date);
 CREATE INDEX IF NOT EXISTS idx_requests_object ON requests(object);
+CREATE INDEX IF NOT EXISTS idx_request_photos_req ON request_photos(request_id);
 """
 
 # Значения настроек по умолчанию
@@ -259,6 +267,49 @@ def get_completed_requests(limit: int = 50) -> List[dict]:
             (limit,),
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ===== Фото к заявкам =====
+
+def add_request_photo(request_id: int, file_id: str):
+    """Сохраняет file_id фото для заявки."""
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT INTO request_photos (request_id, file_id) VALUES (?, ?)",
+            (request_id, file_id),
+        )
+
+
+def get_request_photos(request_id: int) -> List[str]:
+    """Возвращает список file_id фото для заявки."""
+    try:
+        with get_conn() as conn:
+            rows = conn.execute(
+                "SELECT file_id FROM request_photos WHERE request_id = ? ORDER BY id",
+                (request_id,),
+            ).fetchall()
+        return [row["file_id"] for row in rows]
+    except Exception:
+        return []
+
+
+def get_photo_counts(request_ids: List[int]) -> Dict[int, int]:
+    """Возвращает {request_id: photo_count} для списка заявок."""
+    if not request_ids:
+        return {}
+    try:
+        placeholders = ",".join("?" * len(request_ids))
+        with get_conn() as conn:
+            rows = conn.execute(
+                f"""SELECT request_id, COUNT(*) as cnt
+                    FROM request_photos
+                    WHERE request_id IN ({placeholders})
+                    GROUP BY request_id""",
+                request_ids,
+            ).fetchall()
+        return {row["request_id"]: row["cnt"] for row in rows}
+    except Exception:
+        return {}
 
 
 # ===== Привязка инициаторов к Telegram =====

@@ -27,6 +27,7 @@ from db import (
     rename_list_value, delete_list_value, add_list_value,
     get_setting, set_setting, get_active_requests, complete_request,
     link_initiator, get_initiator_tg_id, get_initiator_by_tg_id,
+    add_request_photo, get_request_photos, get_photo_counts,
 )
 from utils import validate_quantity, split_message
 
@@ -34,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 # ===== СОСТОЯНИЯ CONVERSATION =====
 (NAME, QUANTITY, UNIT, INITIATOR, INITIATOR_CUSTOM,
- OBJECT, OBJECT_CUSTOM, NOTES, CONFIRM) = range(9)
+ OBJECT, OBJECT_CUSTOM, NOTES, PHOTO, CONFIRM) = range(10)
 
 # ===== СОСТОЯНИЯ ЗАВЕРШЕНИЯ ЗАЯВКИ =====
 (COMPLETE_SELECT, COMPLETE_CONFIRM) = range(50, 52)
@@ -75,16 +76,53 @@ def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, parse_mode: str = None, disable_web_page_preview: bool = True):
+async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, parse_mode: str = None, disable_web_page_preview: bool = True, reply_markup=None):
     """Отправляет длинное сообщение по частям"""
     parts = split_message(text)
-    for part in parts:
+    for i, part in enumerate(parts):
+        # Клавиатуру прикрепляем только к последней части
+        markup = reply_markup if i == len(parts) - 1 else None
         await context.bot.send_message(
             chat_id=chat_id,
             text=part,
             parse_mode=parse_mode,
-            disable_web_page_preview=disable_web_page_preview
+            disable_web_page_preview=disable_web_page_preview,
+            reply_markup=markup,
         )
+
+
+def _build_photo_keyboard(ids_with_photos: list) -> InlineKeyboardMarkup:
+    """Создаёт inline-клавиатуру с кнопками просмотра фото."""
+    if not ids_with_photos:
+        return None
+    buttons = []
+    for rid in ids_with_photos:
+        buttons.append([InlineKeyboardButton(f"📎 Фото к заявке #{rid}", callback_data=f"photos:{rid}")])
+    return InlineKeyboardMarkup(buttons)
+
+
+async def show_request_photos(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Отправляет фото заявки по нажатию inline-кнопки"""
+    query = update.callback_query
+    await query.answer()
+
+    req_id = int(query.data.split(":")[1])
+    file_ids = get_request_photos(req_id)
+
+    if not file_ids:
+        await query.message.reply_text("📷 Фото не найдены.")
+        return
+
+    for file_id in file_ids:
+        try:
+            await context.bot.send_photo(
+                chat_id=query.message.chat_id,
+                photo=file_id,
+                disable_notification=True,
+            )
+        except Exception as e:
+            logger.warning(f"Не удалось отправить фото {file_id}: {e}")
+            await query.message.reply_text("⚠️ Не удалось отправить одно из фото.")
 
 
 # ===== КОМАНДЫ =====
@@ -177,8 +215,12 @@ async def run_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("⏳ Запускаю анализ...")
 
     try:
-        result = build_report(mode="active")
-        await send_long_message(context, update.effective_chat.id, result, parse_mode='HTML')
+        result, ids_with_photos = build_report(mode="active")
+        keyboard = _build_photo_keyboard(ids_with_photos)
+        await send_long_message(
+            context, update.effective_chat.id, result,
+            parse_mode='HTML', reply_markup=keyboard,
+        )
     except Exception as e:
         logger.error(f"Ошибка анализа: {e}", exc_info=True)
         await update.message.reply_text("❌ Ошибка при формировании отчёта. Попробуйте позже.")
@@ -188,7 +230,7 @@ async def scheduled_report(context: ContextTypes.DEFAULT_TYPE):
     """Автоматический ежедневный отчёт"""
     chat_id = context.job.chat_id
     try:
-        result = build_report()
+        result, _ids = build_report()
         await send_long_message(context, chat_id, result, parse_mode='HTML')
     except Exception as e:
         logger.error(f"Ошибка автоотчёта: {e}", exc_info=True)
@@ -204,7 +246,7 @@ async def start_add_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.clear()
 
     await update.message.reply_text(
-        "📦 <b>Шаг 1/6:</b> Введите наименование товара/услуги:",
+        "📦 <b>Шаг 1/7:</b> Введите наименование товара/услуги:",
         reply_markup=CANCEL_KEYBOARD,
         parse_mode='HTML'
     )
@@ -215,7 +257,7 @@ async def set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет название и запрашивает количество"""
     context.user_data['name'] = update.message.text.strip()
     await update.message.reply_text(
-        "🔢 <b>Шаг 2/6:</b> Введите количество (только число):",
+        "🔢 <b>Шаг 2/7:</b> Введите количество (только число):",
         reply_markup=CANCEL_KEYBOARD,
         parse_mode='HTML'
     )
@@ -245,7 +287,7 @@ async def set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [units[i:i + cols] for i in range(0, len(units), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
-        "📏 <b>Шаг 3/6:</b> Выберите единицу измерения:",
+        "📏 <b>Шаг 3/7:</b> Выберите единицу измерения:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode='HTML'
     )
@@ -272,7 +314,7 @@ async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
         keyboard.append(["❌ Отмена"])
         await update.message.reply_text(
             f"👤 Инициатор: <b>{escape(linked_name)}</b> (автоматически)\n\n"
-            "🏗️ <b>Шаг 5/6:</b> Выберите объект:",
+            "🏗️ <b>Шаг 5/7:</b> Выберите объект:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode='HTML',
         )
@@ -289,7 +331,7 @@ async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [initiators[i:i + cols] for i in range(0, len(initiators), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
-        "👤 <b>Шаг 4/6:</b> Выберите инициатора:",
+        "👤 <b>Шаг 4/7:</b> Выберите инициатора:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
         parse_mode='HTML'
     )
@@ -363,7 +405,7 @@ async def set_object(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['object'] = obj
 
     await update.message.reply_text(
-        "📝 <b>Шаг 6/6:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
+        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
         reply_markup=CANCEL_KEYBOARD,
         parse_mode='HTML'
     )
@@ -375,7 +417,7 @@ async def set_object_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data['object'] = update.message.text.strip()
 
     await update.message.reply_text(
-        "📝 <b>Шаг 6/6:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
+        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
         reply_markup=CANCEL_KEYBOARD,
         parse_mode='HTML'
     )
@@ -383,12 +425,52 @@ async def set_object_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Сохраняет примечание и показывает сводку для подтверждения"""
+    """Сохраняет примечание и переходит к шагу фото"""
     notes = update.message.text.strip()
     if notes == "-":
         notes = ""
 
     context.user_data['notes'] = notes
+    context.user_data['photos'] = []
+
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("➡️ Пропустить", callback_data="photo:done")]
+    ])
+
+    await update.message.reply_text(
+        "📷 <b>Шаг 7/7:</b> Прикрепите фото (несколько штук) или нажмите ➡️ Пропустить:",
+        reply_markup=keyboard,
+        parse_mode='HTML',
+    )
+    return PHOTO
+
+
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Сохраняет file_id полученного фото"""
+    photo = update.message.photo[-1]  # берём самое большое фото
+    context.user_data.setdefault('photos', []).append(photo.file_id)
+
+    count = len(context.user_data['photos'])
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton(f"✅ Готово ({count} шт.)", callback_data="photo:done")],
+    ])
+
+    await update.message.reply_text(
+        f"📷 Фото получено ({count} шт.).\n"
+        "Отправьте ещё или нажмите ✅ Готово:",
+        reply_markup=keyboard,
+    )
+    return PHOTO
+
+
+async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Завершает шаг фото и показывает сводку"""
+    query = update.callback_query
+    await query.answer()
+
+    notes = context.user_data.get('notes', '')
+    photos = context.user_data.get('photos', [])
+    photo_text = f"📎 Фото: {len(photos)} шт." if photos else "📎 Фото: нет"
 
     summary = (
         "📋 <b>Проверьте заявку:</b>\n\n"
@@ -396,7 +478,8 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
         f"🔢 Количество: <code>{escape(context.user_data['quantity'])} {escape(context.user_data['unit'])}</code>\n"
         f"👤 Инициатор: {escape(context.user_data['initiator'])}\n"
         f"🏗️ Объект: {escape(context.user_data['object'])}\n"
-        f"📝 Примечание: {escape(notes) if notes else '—'}\n\n"
+        f"📝 Примечание: {escape(notes) if notes else '—'}\n"
+        f"{photo_text}\n\n"
         "Подтвердите или отмените:"
     )
 
@@ -405,7 +488,7 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
         resize_keyboard=True
     )
 
-    await update.message.reply_text(summary, reply_markup=keyboard, parse_mode='HTML')
+    await query.message.reply_text(summary, reply_markup=keyboard, parse_mode='HTML')
     return CONFIRM
 
 
@@ -434,7 +517,7 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = date.today()
 
     try:
-        add_request(
+        request_id = add_request(
             name=context.user_data['name'],
             quantity=float(context.user_data['quantity']),
             unit=context.user_data['unit'],
@@ -444,6 +527,12 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
             notes=context.user_data['notes'],
         )
 
+        # Сохраняем фото
+        photos = context.user_data.get('photos', [])
+        for file_id in photos:
+            add_request_photo(request_id, file_id)
+
+        photo_text = f"📎 Фото: {len(photos)} шт." if photos else ""
         summary = (
             "✅ <b>Заявка успешно добавлена!</b>\n\n"
             f"📦 Наименование: {escape(context.user_data['name'])}\n"
@@ -452,6 +541,8 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"🏗️ Объект: {escape(context.user_data['object'])}\n"
             f"📝 Примечание: {escape(context.user_data['notes']) if context.user_data['notes'] else '—'}"
         )
+        if photo_text:
+            summary += f"\n{photo_text}"
 
         await update.message.reply_text(
             summary,
@@ -508,8 +599,12 @@ async def analysis_filter_handler(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text("⏳ Формирую отчёт...")
 
     try:
-        result = build_report(mode=mode)
-        await query.message.reply_text(result, parse_mode='HTML', disable_web_page_preview=True)
+        result, ids_with_photos = build_report(mode=mode)
+        keyboard = _build_photo_keyboard(ids_with_photos)
+        await query.message.reply_text(
+            result, parse_mode='HTML', disable_web_page_preview=True,
+            reply_markup=keyboard,
+        )
     except Exception as e:
         logger.error(f"Ошибка формирования отчёта: {e}", exc_info=True)
         await query.message.reply_text("❌ Ошибка при формировании отчёта. Попробуйте позже.")
@@ -1004,6 +1099,10 @@ def main():
             OBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_object)],
             OBJECT_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_object_custom)],
             NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_notes_and_save)],
+            PHOTO: [
+                MessageHandler(filters.PHOTO, handle_photo),
+                CallbackQueryHandler(handle_photo_done, pattern=r'^photo:done$'),
+            ],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_request)],
         },
         fallbacks=[
@@ -1075,6 +1174,7 @@ def main():
     app.add_handler(complete_handler)
     app.add_handler(admin_handler)
     app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(show_request_photos, pattern=r'^photos:\d+$'))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
 
     app.job_queue.run_daily(

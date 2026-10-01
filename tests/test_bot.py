@@ -12,7 +12,7 @@ from bot import (
     set_unit,
     set_notes_and_save,
     confirm_request,
-    NAME, QUANTITY, UNIT, INITIATOR, CONFIRM,
+    NAME, QUANTITY, UNIT, INITIATOR, PHOTO, CONFIRM,
     CANCEL_KEYBOARD,
 )
 from telegram.ext import ConversationHandler
@@ -157,21 +157,23 @@ async def test_set_notes_shows_confirmation():
 
     result = await set_notes_and_save(update, context)
 
-    assert result == CONFIRM
+    assert result == PHOTO
     assert context.user_data["notes"] == "Срочно"
+    assert context.user_data["photos"] == []
     reply_text = update.message.reply_text.call_args[0][0]
-    assert "Проверьте заявку" in reply_text
+    assert "Шаг 7/7" in reply_text
 
 
 @pytest.mark.asyncio
-@patch("bot.add_request")
+@patch("bot.add_request_photo")
+@patch("bot.add_request", return_value=1)
 @patch("bot.ADMIN_IDS", [123])
-async def test_confirm_request_saves(mock_add):
+async def test_confirm_request_saves(mock_add, mock_photo):
     update = make_update(text="✅ Подтвердить", user_id=123)
     context = make_context()
     context.user_data = {
         "name": "Кирпич", "quantity": "100", "unit": "шт",
-        "initiator": "Иван", "object": "Стройка", "notes": "Срочно"
+        "initiator": "Иван", "object": "Стройка", "notes": "Срочно", "photos": []
     }
 
     result = await confirm_request(update, context)

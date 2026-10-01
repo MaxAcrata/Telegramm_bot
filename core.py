@@ -4,7 +4,7 @@ from datetime import datetime, timedelta, date
 from html import escape
 
 from config import OVERDUE_DAYS, REPORT_FILE_NAME
-from db import get_active_requests, get_completed_requests
+from db import get_active_requests, get_completed_requests, get_photo_counts
 
 logger = logging.getLogger(__name__)
 
@@ -49,7 +49,7 @@ def make_links_clickable(text: str) -> str:
     return "".join(parts)
 
 
-def format_task_html(task: dict, today: date) -> str:
+def format_task_html(task: dict, today: date, photo_count: int = 0) -> str:
     """Форматирует одну задачу в HTML для Telegram"""
     name = escape(task.get("name", "Без названия"))
     qty = task.get("quantity")
@@ -91,24 +91,30 @@ def format_task_html(task: dict, today: date) -> str:
         notes_html = make_links_clickable(notes_raw)
         lines.append(f"   └ Примечание: {notes_html}")
 
+    if photo_count:
+        lines.append(f"   └ 📎 Фото: {photo_count} шт.")
+
     if is_overdue:
         lines.append(f"   └ ⚠️ Просрочено на {days_elapsed} дн.")
 
     return "\n".join(lines)
 
 
-def build_report(save_to_file: bool = True, mode: str = "active") -> str:
-    """Генерирует HTML-отчёт. mode: 'active' или 'completed'."""
+def build_report(save_to_file: bool = True, mode: str = "active") -> tuple:
+    """Генерирует HTML-отчёт. mode: 'active' или 'completed'.
+    Возвращает (text, ids_with_photos) — текст отчёта и список ID заявок с фото."""
     today = date.today()
 
     if mode == "completed":
-        return _build_completed_report(today, save_to_file)
+        text, ids = _build_completed_report(today, save_to_file)
+    else:
+        text, ids = _build_active_report(today, save_to_file)
 
-    return _build_active_report(today, save_to_file)
+    return text, ids
 
 
-def _build_completed_report(today: date, save_to_file: bool) -> str:
-    """Отчёт по выполненным заявкам."""
+def _build_completed_report(today: date, save_to_file: bool) -> tuple:
+    """Отчёт по выполненным заявкам. Возвращает (text, ids_with_photos)."""
     tasks = get_completed_requests()
 
     report = [
@@ -123,7 +129,12 @@ def _build_completed_report(today: date, save_to_file: bool) -> str:
         result = "\n".join(report)
         if save_to_file:
             _save_report(result)
-        return result
+        return result, []
+
+    # Получаем количество фото для всех заявок
+    task_ids = [t["id"] for t in tasks]
+    photo_counts = get_photo_counts(task_ids)
+    ids_with_photos = [rid for rid, cnt in photo_counts.items() if cnt > 0]
 
     for task in tasks:
         name = escape(task.get("name", "—"))
@@ -148,16 +159,21 @@ def _build_completed_report(today: date, save_to_file: bool) -> str:
             notes_html = make_links_clickable(notes_raw)
             report.append(f"   └ Примечание: {notes_html}")
 
+        # Добавляем количество фото
+        pc = photo_counts.get(task["id"], 0)
+        if pc:
+            report.append(f"   └ 📎 Фото: {pc} шт.")
+
         report.append("")
 
     result = "\n".join(report)
     if save_to_file:
         _save_report(result)
-    return result
+    return result, ids_with_photos
 
 
-def _build_active_report(today: date, save_to_file: bool) -> str:
-    """Отчёт по активным заявкам."""
+def _build_active_report(today: date, save_to_file: bool) -> tuple:
+    """Отчёт по активным заявкам. Возвращает (text, ids_with_photos)."""
     active_tasks = get_active_requests()
 
     report = [
@@ -172,7 +188,7 @@ def _build_active_report(today: date, save_to_file: bool) -> str:
         result = "\n".join(report)
         if save_to_file:
             _save_report(result)
-        return result
+        return result, []
 
     # Статистика
     ordered = [t for t in active_tasks if "заказ" in (t.get("notes") or "").lower()]
@@ -192,12 +208,19 @@ def _build_active_report(today: date, save_to_file: bool) -> str:
 
     # Группировка по объектам
     from itertools import groupby
+
+    # Получаем количество фото для всех заявок
+    task_ids = [t["id"] for t in active_tasks]
+    photo_counts = get_photo_counts(task_ids)
+    ids_with_photos = [rid for rid, cnt in photo_counts.items() if cnt > 0]
+
     sorted_tasks = sorted(active_tasks, key=lambda t: t.get("object", ""))
     for obj, group_iter in groupby(sorted_tasks, key=lambda t: t.get("object", "")):
         group = list(group_iter)
         report.append(f"\n <b>Объект: {escape(obj)}</b>")
         for task in group:
-            report.append(format_task_html(task, today))
+            pc = photo_counts.get(task["id"], 0)
+            report.append(format_task_html(task, today, photo_count=pc))
         report.append("")
 
     # Раздел просроченных заявок по инициаторам
@@ -218,7 +241,9 @@ def _build_active_report(today: date, save_to_file: bool) -> str:
                 req_date_str = task.get("request_date", "")
                 req_date = date.fromisoformat(req_date_str) if req_date_str else None
                 days = (today - req_date).days if req_date else 0
-                report.append(f"    • {name} ({obj}) — {days} дн.")
+                pc = photo_counts.get(task["id"], 0)
+                photo_label = f" 📎{pc}" if pc else ""
+                report.append(f"    • {name} ({obj}) — {days} дн.{photo_label}")
                 if notes_raw and notes_raw != "-":
                     notes_html = make_links_clickable(notes_raw)
                     report.append(f"      Примечание: {notes_html}")
@@ -227,7 +252,7 @@ def _build_active_report(today: date, save_to_file: bool) -> str:
     if save_to_file:
         _save_report(result)
     logger.info("Отчёт сформирован")
-    return result
+    return result, ids_with_photos
 
 
 def _save_report(text: str):
