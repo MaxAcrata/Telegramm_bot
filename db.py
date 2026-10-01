@@ -132,6 +132,34 @@ def add_request(
     return row_id
 
 
+def add_request_with_photos(
+    name: str,
+    quantity: float,
+    unit: str,
+    request_date: date,
+    initiator: str,
+    object_name: str,
+    notes: str = "",
+    photo_file_ids: Optional[List[str]] = None,
+) -> int:
+    """Добавляет заявку и фото в одной транзакции. Возвращает ID заявки."""
+    with get_conn() as conn:
+        cursor = conn.execute(
+            """INSERT INTO requests
+               (name, quantity, unit, request_date, initiator, object, notes)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (name, quantity, unit, request_date.isoformat(), initiator, object_name, notes),
+        )
+        row_id = cursor.lastrowid
+        if photo_file_ids:
+            conn.executemany(
+                "INSERT INTO request_photos (request_id, file_id) VALUES (?, ?)",
+                [(row_id, fid) for fid in photo_file_ids],
+            )
+    logger.info(f"Заявка #{row_id} добавлена: {name} (фото: {len(photo_file_ids or [])})")
+    return row_id
+
+
 def get_active_requests() -> List[dict]:
     """Возвращает активные заявки (без done_date), отсортированные по объекту."""
     with get_conn() as conn:
@@ -223,7 +251,8 @@ def get_setting(key: str, default: str = "") -> str:
                 "SELECT value FROM settings WHERE key = ?", (key,)
             ).fetchone()
         return row["value"] if row else default
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_setting({key!r}) ошибка: {e}")
         return default
 
 
@@ -289,7 +318,8 @@ def get_request_photos(request_id: int) -> List[str]:
                 (request_id,),
             ).fetchall()
         return [row["file_id"] for row in rows]
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_request_photos({request_id}) ошибка: {e}")
         return []
 
 
@@ -298,17 +328,24 @@ def get_photo_counts(request_ids: List[int]) -> Dict[int, int]:
     if not request_ids:
         return {}
     try:
-        placeholders = ",".join("?" * len(request_ids))
-        with get_conn() as conn:
-            rows = conn.execute(
-                f"""SELECT request_id, COUNT(*) as cnt
-                    FROM request_photos
-                    WHERE request_id IN ({placeholders})
-                    GROUP BY request_id""",
-                request_ids,
-            ).fetchall()
-        return {row["request_id"]: row["cnt"] for row in rows}
-    except Exception:
+        result = {}
+        # SQLite лимит на placeholders — 999, разбиваем на батчи
+        batch_size = 900
+        for i in range(0, len(request_ids), batch_size):
+            batch = request_ids[i:i + batch_size]
+            placeholders = ",".join("?" * len(batch))
+            with get_conn() as conn:
+                rows = conn.execute(
+                    f"""SELECT request_id, COUNT(*) as cnt
+                        FROM request_photos
+                        WHERE request_id IN ({placeholders})
+                        GROUP BY request_id""",
+                    batch,
+                ).fetchall()
+            result.update({row["request_id"]: row["cnt"] for row in rows})
+        return result
+    except Exception as e:
+        logger.warning(f"get_photo_counts ошибка: {e}")
         return {}
 
 
@@ -335,7 +372,8 @@ def get_initiator_tg_id(initiator_name: str) -> Optional[int]:
                 (initiator_name,),
             ).fetchone()
         return row["telegram_id"] if row else None
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_initiator_tg_id({initiator_name!r}) ошибка: {e}")
         return None
 
 
@@ -348,7 +386,8 @@ def get_initiator_by_tg_id(telegram_id: int) -> Optional[str]:
                 (telegram_id,),
             ).fetchone()
         return row["initiator_name"] if row else None
-    except Exception:
+    except Exception as e:
+        logger.warning(f"get_initiator_by_tg_id({telegram_id}) ошибка: {e}")
         return None
 
 

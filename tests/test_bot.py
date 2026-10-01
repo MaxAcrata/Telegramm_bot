@@ -167,7 +167,7 @@ async def test_set_notes_shows_confirmation():
 
 @pytest.mark.asyncio
 @patch("bot.add_request_photo")
-@patch("bot.add_request", return_value=1)
+@patch("bot.add_request_with_photos", return_value=1)
 @patch("bot.ADMIN_IDS", [123])
 async def test_confirm_request_saves(mock_add, mock_photo):
     update = make_update(text="✅ Подтвердить", user_id=123)

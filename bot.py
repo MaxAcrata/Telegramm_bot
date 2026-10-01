@@ -23,7 +23,7 @@ from config import (
 )
 from core import build_report
 from db import (
-    init_db, get_all_lists, add_request,
+    init_db, get_all_lists, add_request, add_request_with_photos,
     rename_list_value, delete_list_value, add_list_value,
     get_setting, set_setting, get_active_requests, complete_request,
     link_initiator, get_initiator_tg_id, get_initiator_by_tg_id,
@@ -91,7 +91,12 @@ async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, te
         )
 
 
-def _build_photo_keyboard(ids_with_photos: list) -> InlineKeyboardMarkup:
+def _truncate_callback_data(prefix: str, value: str, max_bytes: int = 64) -> str:
+    """Обрезает значение так, чтобы prefix + value не превышали max_bytes в UTF-8."""
+    result = value
+    while len((prefix + result).encode("utf-8")) > max_bytes and result:
+        result = result[:-1]
+    return result
     """Создаёт inline-клавиатуру с кнопками просмотра фото."""
     if not ids_with_photos:
         return None
@@ -468,6 +473,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return PHOTO
 
 
+async def handle_photo_hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Подсказка, если пользователь отправил не фото в PHOTO-состоянии"""
+    await update.message.reply_text(
+        "📷 Отправьте фото или нажмите кнопку внизу экрана.",
+    )
+    return PHOTO
+
+
 async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Завершает шаг фото и показывает сводку"""
     notes = context.user_data.get('notes', '')
@@ -507,7 +520,7 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return ConversationHandler.END
 
-    if text != "✅ Подтвердить":
+    if text not in ("✅ Подтвердить", "🔄 Повторить"):
         await update.message.reply_text(
             "⚠️ Используйте кнопки:\n"
             "✅ Подтвердить — сохранить заявку\n"
@@ -519,20 +532,17 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = date.today()
 
     try:
-        request_id = add_request(
+        photos = context.user_data.get('photos', [])
+        request_id = add_request_with_photos(
             name=context.user_data['name'],
-            quantity=float(context.user_data['quantity']),
+            quantity=float(context.user_data['quantity'].replace(",", ".")),
             unit=context.user_data['unit'],
             request_date=today,
             initiator=context.user_data['initiator'],
             object_name=context.user_data['object'],
             notes=context.user_data['notes'],
+            photo_file_ids=photos,
         )
-
-        # Сохраняем фото
-        photos = context.user_data.get('photos', [])
-        for file_id in photos:
-            add_request_photo(request_id, file_id)
 
         photo_text = f"📎 Фото: {len(photos)} шт." if photos else ""
         summary = (
@@ -551,12 +561,20 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
             reply_markup=get_main_keyboard(user_id),
             parse_mode='HTML'
         )
+        context.user_data.clear()
 
     except Exception as e:
         logger.error(f"Ошибка при сохранении заявки: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ошибка при сохранении заявки. Попробуйте позже.")
+        keyboard = ReplyKeyboardMarkup(
+            [["🔄 Повторить", "❌ Отмена"]],
+            resize_keyboard=True,
+        )
+        await update.message.reply_text(
+            "❌ Ошибка при сохранении заявки. Попробуйте ещё раз или отмените.",
+            reply_markup=keyboard,
+        )
+        return CONFIRM
 
-    context.user_data.clear()
     return ConversationHandler.END
 
 
@@ -603,9 +621,9 @@ async def analysis_filter_handler(update: Update, context: ContextTypes.DEFAULT_
     try:
         result, ids_with_photos = build_report(mode=mode)
         keyboard = _build_photo_keyboard(ids_with_photos)
-        await query.message.reply_text(
-            result, parse_mode='HTML', disable_web_page_preview=True,
-            reply_markup=keyboard,
+        await send_long_message(
+            context, query.message.chat_id, result,
+            parse_mode='HTML', reply_markup=keyboard,
         )
     except Exception as e:
         logger.error(f"Ошибка формирования отчёта: {e}", exc_info=True)
@@ -826,7 +844,7 @@ async def _show_list(update: Update, context: ContextTypes.DEFAULT_TYPE, list_ty
     for v in values:
         if v == "Другое":
             continue
-        safe_v = v[:50]  # Limit callback_data length
+        safe_v = _truncate_callback_data("rename:", v)
         keyboard.append([
             InlineKeyboardButton(f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"),
             InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
@@ -1022,7 +1040,7 @@ async def _show_list_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, lis
     for v in values:
         if v == "Другое":
             continue
-        safe_v = v[:50]  # Limit callback_data length
+        safe_v = _truncate_callback_data("rename:", v)
         keyboard.append([
             InlineKeyboardButton(f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"),
             InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
@@ -1106,6 +1124,7 @@ def main():
                 MessageHandler(filters.Regex('^✅ Готово$'), handle_photo_done),
                 MessageHandler(filters.Regex('^➡️ Пропустить$'), handle_photo_done),
                 MessageHandler(filters.Regex('^❌ Отмена$'), cancel),
+                MessageHandler(filters.ALL & ~filters.COMMAND, handle_photo_hint),
             ],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_request)],
         },

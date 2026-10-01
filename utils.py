@@ -66,6 +66,7 @@ def split_message(text: str, max_length: int = 4000) -> list:
         part = text[:cut]
 
         # Закрываем незакрытые HTML-теги в этой части
+        # Храним (tag_name, full_opening_tag) для сохранения атрибутов
         open_tags = []
         i = 0
         while i < len(part):
@@ -73,31 +74,32 @@ def split_message(text: str, max_length: int = 4000) -> list:
                 end = part.find(">", i)
                 if end == -1:
                     break
+                full_tag = part[i:end + 1]
                 tag_content = part[i + 1:end]
                 if tag_content.startswith("/"):
-                    if open_tags and open_tags[-1] == tag_content[1:].split()[0]:
+                    close_name = tag_content[1:].split()[0]
+                    if open_tags and open_tags[-1][0] == close_name:
                         open_tags.pop()
                 elif not tag_content.endswith("/"):
                     tag_name = tag_content.split()[0]
                     if tag_name in ("b", "i", "u", "s", "code", "pre", "em", "strong", "a"):
-                        open_tags.append(tag_name)
+                        open_tags.append((tag_name, full_tag))
                 i = end + 1
             else:
                 i += 1
 
         # Закрываем открытые теги
-        for tag in reversed(open_tags):
-            part += f"</{tag}>"
+        for tag_name, _ in reversed(open_tags):
+            part += f"</{tag_name}>"
 
         messages.append(part)
 
-        # Убираем закрывающие теги из начала следующей части и восстанавливаем открытые
+        # Восстанавливаем открытые теги в следующей части (с атрибутами)
         remainder_start = cut
-        # Пропускаем закрывающие теги, которые мы добавили
         while remainder_start < len(text) and text[remainder_start] == "\n":
             remainder_start += 1
 
-        reopen = "".join(f"<{tag}>" for tag in open_tags)
+        reopen = "".join(full_tag for _, full_tag in open_tags)
         text = reopen + text[remainder_start:]
 
     return messages
