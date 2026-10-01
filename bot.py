@@ -97,6 +97,9 @@ def _truncate_callback_data(prefix: str, value: str, max_bytes: int = 64) -> str
     while len((prefix + result).encode("utf-8")) > max_bytes and result:
         result = result[:-1]
     return result
+
+
+def _build_photo_keyboard(ids_with_photos: list) -> InlineKeyboardMarkup:
     """Создаёт inline-клавиатуру с кнопками просмотра фото."""
     if not ids_with_photos:
         return None
