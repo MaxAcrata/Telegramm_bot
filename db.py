@@ -110,6 +110,7 @@ def init_db():
 
 # ===== Запросы (requests) =====
 
+
 def add_request(
     name: str,
     quantity: float,
@@ -125,7 +126,15 @@ def add_request(
             """INSERT INTO requests
                (name, quantity, unit, request_date, initiator, object, notes)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (name, quantity, unit, request_date.isoformat(), initiator, object_name, notes),
+            (
+                name,
+                quantity,
+                unit,
+                request_date.isoformat(),
+                initiator,
+                object_name,
+                notes,
+            ),
         )
         row_id = cursor.lastrowid
     logger.info(f"Заявка #{row_id} добавлена: {name}")
@@ -148,7 +157,15 @@ def add_request_with_photos(
             """INSERT INTO requests
                (name, quantity, unit, request_date, initiator, object, notes)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (name, quantity, unit, request_date.isoformat(), initiator, object_name, notes),
+            (
+                name,
+                quantity,
+                unit,
+                request_date.isoformat(),
+                initiator,
+                object_name,
+                notes,
+            ),
         )
         row_id = cursor.lastrowid
         if photo_file_ids:
@@ -156,20 +173,20 @@ def add_request_with_photos(
                 "INSERT INTO request_photos (request_id, file_id) VALUES (?, ?)",
                 [(row_id, fid) for fid in photo_file_ids],
             )
-    logger.info(f"Заявка #{row_id} добавлена: {name} (фото: {len(photo_file_ids or [])})")
+    logger.info(
+        f"Заявка #{row_id} добавлена: {name} (фото: {len(photo_file_ids or [])})"
+    )
     return row_id
 
 
 def get_active_requests() -> List[dict]:
     """Возвращает активные заявки (без done_date), отсортированные по объекту."""
     with get_conn() as conn:
-        rows = conn.execute(
-            """SELECT id, name, quantity, unit, request_date, done_date,
+        rows = conn.execute("""SELECT id, name, quantity, unit, request_date, done_date,
                       initiator, status, object, notes
                FROM requests
                WHERE done_date IS NULL AND request_date IS NOT NULL
-               ORDER BY object, request_date"""
-        ).fetchall()
+               ORDER BY object, request_date""").fetchall()
     return [dict(r) for r in rows]
 
 
@@ -300,6 +317,7 @@ def get_completed_requests(limit: int = 50) -> List[dict]:
 
 # ===== Фото к заявкам =====
 
+
 def add_request_photo(request_id: int, file_id: str):
     """Сохраняет file_id фото для заявки."""
     with get_conn() as conn:
@@ -332,7 +350,7 @@ def get_photo_counts(request_ids: List[int]) -> Dict[int, int]:
         # SQLite лимит на placeholders — 999, разбиваем на батчи
         batch_size = 900
         for i in range(0, len(request_ids), batch_size):
-            batch = request_ids[i:i + batch_size]
+            batch = request_ids[i : i + batch_size]
             placeholders = ",".join("?" * len(batch))
             with get_conn() as conn:
                 rows = conn.execute(
@@ -350,6 +368,7 @@ def get_photo_counts(request_ids: List[int]) -> Dict[int, int]:
 
 
 # ===== Привязка инициаторов к Telegram =====
+
 
 def link_initiator(initiator_name: str, telegram_id: int):
     """Привязывает инициатора к Telegram-ID."""

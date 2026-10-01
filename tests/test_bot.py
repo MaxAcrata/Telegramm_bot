@@ -1,4 +1,5 @@
 """Тесты для bot.py"""
+
 import pytest
 from unittest.mock import patch, MagicMock, AsyncMock
 
@@ -12,13 +13,18 @@ from bot import (
     set_unit,
     set_notes_and_save,
     confirm_request,
-    NAME, QUANTITY, UNIT, INITIATOR, PHOTO, CONFIRM,
+    NAME,
+    QUANTITY,
+    UNIT,
+    INITIATOR,
+    PHOTO,
+    CONFIRM,
     CANCEL_KEYBOARD,
 )
 from telegram.ext import ConversationHandler
 
-
 # ===== Вспомогательные функции =====
+
 
 def make_update(text: str = None, user_id: int = 123, first_name: str = "Тест"):
     """Создаёт мок Update"""
@@ -40,6 +46,7 @@ def make_context():
 
 
 # ===== Тесты вспомогательных функций =====
+
 
 @patch("bot.ADMIN_IDS", [111, 222])
 def test_is_admin_true():
@@ -69,6 +76,7 @@ def test_get_main_keyboard_user():
 
 # ===== Тесты отмены =====
 
+
 @pytest.mark.asyncio
 @patch("bot.ADMIN_IDS", [123])
 async def test_cancel_clears_user_data():
@@ -84,6 +92,7 @@ async def test_cancel_clears_user_data():
 
 # ===== Тесты начала диалога =====
 
+
 @pytest.mark.asyncio
 @patch("bot.ADMIN_IDS", [123])
 async def test_start_add_request():
@@ -97,6 +106,7 @@ async def test_start_add_request():
 
 
 # ===== Тесты шагов диалога =====
+
 
 @pytest.mark.asyncio
 async def test_set_name():
@@ -132,7 +142,14 @@ async def test_set_quantity_invalid():
 
 
 @pytest.mark.asyncio
-@patch("bot.get_all_lists", return_value={"initiator": ["Иван", "Петр", "Другое"], "unit": ["шт", "кг"], "object": ["Объект1"]})
+@patch(
+    "bot.get_all_lists",
+    return_value={
+        "initiator": ["Иван", "Петр", "Другое"],
+        "unit": ["шт", "кг"],
+        "object": ["Объект1"],
+    },
+)
 async def test_set_unit(mock_lists):
     update = make_update(text="шт")
     context = make_context()
@@ -146,13 +163,17 @@ async def test_set_unit(mock_lists):
 
 # ===== Тесты подтверждения =====
 
+
 @pytest.mark.asyncio
 async def test_set_notes_shows_confirmation():
     update = make_update(text="Срочно")
     context = make_context()
     context.user_data = {
-        "name": "Кирпич", "quantity": "100", "unit": "шт",
-        "initiator": "Иван", "object": "Стройка"
+        "name": "Кирпич",
+        "quantity": "100",
+        "unit": "шт",
+        "initiator": "Иван",
+        "object": "Стройка",
     }
 
     result = await set_notes_and_save(update, context)
@@ -173,8 +194,13 @@ async def test_confirm_request_saves(mock_add, mock_photo):
     update = make_update(text="✅ Подтвердить", user_id=123)
     context = make_context()
     context.user_data = {
-        "name": "Кирпич", "quantity": "100", "unit": "шт",
-        "initiator": "Иван", "object": "Стройка", "notes": "Срочно", "photos": []
+        "name": "Кирпич",
+        "quantity": "100",
+        "unit": "шт",
+        "initiator": "Иван",
+        "object": "Стройка",
+        "notes": "Срочно",
+        "photos": [],
     }
 
     result = await confirm_request(update, context)

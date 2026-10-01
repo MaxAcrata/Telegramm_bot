@@ -4,8 +4,7 @@ from datetime import datetime
 from typing import Optional
 
 logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s"
+    level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s"
 )
 
 
@@ -74,15 +73,25 @@ def split_message(text: str, max_length: int = 4000) -> list:
                 end = part.find(">", i)
                 if end == -1:
                     break
-                full_tag = part[i:end + 1]
-                tag_content = part[i + 1:end]
+                full_tag = part[i : end + 1]
+                tag_content = part[i + 1 : end]
                 if tag_content.startswith("/"):
                     close_name = tag_content[1:].split()[0]
                     if open_tags and open_tags[-1][0] == close_name:
                         open_tags.pop()
                 elif not tag_content.endswith("/"):
                     tag_name = tag_content.split()[0]
-                    if tag_name in ("b", "i", "u", "s", "code", "pre", "em", "strong", "a"):
+                    if tag_name in (
+                        "b",
+                        "i",
+                        "u",
+                        "s",
+                        "code",
+                        "pre",
+                        "em",
+                        "strong",
+                        "a",
+                    ):
                         open_tags.append((tag_name, full_tag))
                 i = end + 1
             else:

@@ -1,7 +1,13 @@
 import logging
 from datetime import time, datetime, date
 from html import escape
-from telegram import Update, ReplyKeyboardMarkup, ReplyKeyboardRemove, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import (
+    Update,
+    ReplyKeyboardMarkup,
+    ReplyKeyboardRemove,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -23,30 +29,58 @@ from config import (
 )
 from core import build_report
 from db import (
-    init_db, get_all_lists, add_request, add_request_with_photos,
-    rename_list_value, delete_list_value, add_list_value,
-    get_setting, set_setting, get_active_requests, complete_request,
-    link_initiator, get_initiator_tg_id, get_initiator_by_tg_id,
-    add_request_photo, get_request_photos, get_photo_counts,
+    init_db,
+    get_all_lists,
+    add_request,
+    add_request_with_photos,
+    rename_list_value,
+    delete_list_value,
+    add_list_value,
+    get_setting,
+    set_setting,
+    get_active_requests,
+    complete_request,
+    link_initiator,
+    get_initiator_tg_id,
+    get_initiator_by_tg_id,
+    add_request_photo,
+    get_request_photos,
+    get_photo_counts,
 )
 from utils import validate_quantity, split_message
 
 logger = logging.getLogger(__name__)
 
 # ===== СОСТОЯНИЯ CONVERSATION =====
-(NAME, QUANTITY, UNIT, INITIATOR, INITIATOR_CUSTOM,
- OBJECT, OBJECT_CUSTOM, NOTES, PHOTO, CONFIRM) = range(10)
+(
+    NAME,
+    QUANTITY,
+    UNIT,
+    INITIATOR,
+    INITIATOR_CUSTOM,
+    OBJECT,
+    OBJECT_CUSTOM,
+    NOTES,
+    PHOTO,
+    CONFIRM,
+) = range(10)
 
 # ===== СОСТОЯНИЯ ЗАВЕРШЕНИЯ ЗАЯВКИ =====
-(COMPLETE_SELECT, COMPLETE_CONFIRM) = range(50, 52)
+COMPLETE_SELECT, COMPLETE_CONFIRM = range(50, 52)
 
 # ===== СОСТОЯНИЕ РЕГИСТРАЦИИ ИНИЦИАТОРА =====
 REG_NAME = 90
 
 # ===== СОСТОЯНИЯ АДМИН-ПАНЕЛИ =====
-(ADMIN_MENU, ADMIN_LIST_VIEW, ADMIN_RENAME_OLD,
- ADMIN_RENAME_NEW, ADMIN_DELETE, ADMIN_ADD_VALUE,
- ADMIN_BUTTONS_EDIT) = range(100, 107)
+(
+    ADMIN_MENU,
+    ADMIN_LIST_VIEW,
+    ADMIN_RENAME_OLD,
+    ADMIN_RENAME_NEW,
+    ADMIN_DELETE,
+    ADMIN_ADD_VALUE,
+    ADMIN_BUTTONS_EDIT,
+) = range(100, 107)
 
 # ===== КЛАВИАТУРА ОТМЕНЫ =====
 CANCEL_KEYBOARD = ReplyKeyboardMarkup(
@@ -68,7 +102,7 @@ def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
             ["➕ Добавить заявку"],
             ["✅ Завершить заявку"],
             ["⚙️ Настройки"],
-            ["⛔ Выход"]
+            ["⛔ Выход"],
         ]
     else:
         keyboard = [["➕ Добавить заявку"], ["⛔ Выход"]]
@@ -76,7 +110,14 @@ def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, parse_mode: str = None, disable_web_page_preview: bool = True, reply_markup=None):
+async def send_long_message(
+    context: ContextTypes.DEFAULT_TYPE,
+    chat_id: int,
+    text: str,
+    parse_mode: str = None,
+    disable_web_page_preview: bool = True,
+    reply_markup=None,
+):
     """Отправляет длинное сообщение по частям"""
     parts = split_message(text)
     for i, part in enumerate(parts):
@@ -105,7 +146,13 @@ def _build_photo_keyboard(ids_with_photos: list) -> InlineKeyboardMarkup:
         return None
     buttons = []
     for rid in ids_with_photos:
-        buttons.append([InlineKeyboardButton(f"📎 Фото к заявке #{rid}", callback_data=f"photos:{rid}")])
+        buttons.append(
+            [
+                InlineKeyboardButton(
+                    f"📎 Фото к заявке #{rid}", callback_data=f"photos:{rid}"
+                )
+            ]
+        )
     return InlineKeyboardMarkup(buttons)
 
 
@@ -146,7 +193,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Автоотчёт приходит каждый день в {REPORT_HOUR:02d}:{REPORT_MINUTE:02d}.\n\n"
             "Выберите действие:"
         )
-        await update.message.reply_text(text, reply_markup=markup, parse_mode='HTML')
+        await update.message.reply_text(text, reply_markup=markup, parse_mode="HTML")
         return ConversationHandler.END
     else:
         existing = get_initiator_by_tg_id(user_id)
@@ -156,7 +203,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"Вы привязаны как <b>{escape(existing)}</b>.\n"
                 "Используйте бот для добавления заявок.",
                 reply_markup=get_main_keyboard(user_id),
-                parse_mode='HTML',
+                parse_mode="HTML",
             )
             return ConversationHandler.END
         else:
@@ -169,14 +216,14 @@ async def register_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     initiators = [i for i in lists.get("initiator", []) if i != "Другое"]
 
     cols = int(get_setting("buttons_per_row_initiator", "4"))
-    keyboard = [initiators[i:i + cols] for i in range(0, len(initiators), cols)]
+    keyboard = [initiators[i : i + cols] for i in range(0, len(initiators), cols)]
     keyboard.append(["Другое"])
 
     await update.message.reply_text(
         "👋 <b>Добро пожаловать!</b>\n\n"
         "Выберите своё имя из списка, чтобы получать уведомления о заявках:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return REG_NAME
 
@@ -199,7 +246,7 @@ async def register_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"⚠️ Имя «{escape(text)}» уже привязано к другому пользователю.\n"
             "Выберите другое имя или обратитесь к администратору.",
-            parse_mode='HTML',
+            parse_mode="HTML",
         )
         return REG_NAME
 
@@ -209,7 +256,7 @@ async def register_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Теперь вы будете получать уведомления о выполнении ваших заявок.\n"
         "Используйте «➕ Добавить заявку» для создания заявки.",
         reply_markup=get_main_keyboard(user_id),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ConversationHandler.END
 
@@ -226,12 +273,17 @@ async def run_analysis(update: Update, context: ContextTypes.DEFAULT_TYPE):
         result, ids_with_photos = build_report(mode="active")
         keyboard = _build_photo_keyboard(ids_with_photos)
         await send_long_message(
-            context, update.effective_chat.id, result,
-            parse_mode='HTML', reply_markup=keyboard,
+            context,
+            update.effective_chat.id,
+            result,
+            parse_mode="HTML",
+            reply_markup=keyboard,
         )
     except Exception as e:
         logger.error(f"Ошибка анализа: {e}", exc_info=True)
-        await update.message.reply_text("❌ Ошибка при формировании отчёта. Попробуйте позже.")
+        await update.message.reply_text(
+            "❌ Ошибка при формировании отчёта. Попробуйте позже."
+        )
 
 
 async def scheduled_report(context: ContextTypes.DEFAULT_TYPE):
@@ -239,7 +291,7 @@ async def scheduled_report(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
     try:
         result, _ids = build_report()
-        await send_long_message(context, chat_id, result, parse_mode='HTML')
+        await send_long_message(context, chat_id, result, parse_mode="HTML")
     except Exception as e:
         logger.error(f"Ошибка автоотчёта: {e}", exc_info=True)
         await context.bot.send_message(
@@ -256,18 +308,18 @@ async def start_add_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "📦 <b>Шаг 1/7:</b> Введите наименование товара/услуги:",
         reply_markup=CANCEL_KEYBOARD,
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return NAME
 
 
 async def set_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет название и запрашивает количество"""
-    context.user_data['name'] = update.message.text.strip()
+    context.user_data["name"] = update.message.text.strip()
     await update.message.reply_text(
         "🔢 <b>Шаг 2/7:</b> Введите количество (только число):",
         reply_markup=CANCEL_KEYBOARD,
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return QUANTITY
 
@@ -279,11 +331,11 @@ async def set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not validate_quantity(qty):
         await update.message.reply_text(
             "❌ Пожалуйста, введите <b>число</b> (например, 10 или 5.5):",
-            parse_mode='HTML'
+            parse_mode="HTML",
         )
         return QUANTITY
 
-    context.user_data['quantity'] = qty
+    context.user_data["quantity"] = qty
 
     try:
         lists = get_all_lists()
@@ -292,25 +344,25 @@ async def set_quantity(update: Update, context: ContextTypes.DEFAULT_TYPE):
         units = ["шт", "кг", "л", "м2", "м3", "лист", "м.п.", "комп"]
 
     cols = int(get_setting("buttons_per_row_unit", "3"))
-    keyboard = [units[i:i + cols] for i in range(0, len(units), cols)]
+    keyboard = [units[i : i + cols] for i in range(0, len(units), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
         "📏 <b>Шаг 3/7:</b> Выберите единицу измерения:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return UNIT
 
 
 async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет единицу измерения и запрашивает инициатора (или ставит автоматически)"""
-    context.user_data['unit'] = update.message.text.strip()
+    context.user_data["unit"] = update.message.text.strip()
 
     user_id = update.effective_user.id
     linked_name = get_initiator_by_tg_id(user_id)
 
     if linked_name:
-        context.user_data['initiator'] = linked_name
+        context.user_data["initiator"] = linked_name
         try:
             lists = get_all_lists()
             objects = lists.get("object", ["Солнечное", "Привилегия", "Не указан"])
@@ -318,30 +370,32 @@ async def set_unit(update: Update, context: ContextTypes.DEFAULT_TYPE):
             objects = ["Солнечное", "Привилегия", "Не указан"]
 
         cols = int(get_setting("buttons_per_row_object", "2"))
-        keyboard = [objects[i:i + cols] for i in range(0, len(objects), cols)]
+        keyboard = [objects[i : i + cols] for i in range(0, len(objects), cols)]
         keyboard.append(["❌ Отмена"])
         await update.message.reply_text(
             f"👤 Инициатор: <b>{escape(linked_name)}</b> (автоматически)\n\n"
             "🏗️ <b>Шаг 5/7:</b> Выберите объект:",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode='HTML',
+            parse_mode="HTML",
         )
         return OBJECT
 
     try:
         lists = get_all_lists()
-        initiators = lists.get("initiator", ["Алексей", "Анатолий", "Михаил", "Игорь", "Другое"])
+        initiators = lists.get(
+            "initiator", ["Алексей", "Анатолий", "Михаил", "Игорь", "Другое"]
+        )
     except Exception as e:
         logger.error(f"Ошибка загрузки списков: {e}")
         initiators = ["Алексей", "Анатолий", "Михаил", "Игорь", "Другое"]
 
     cols = int(get_setting("buttons_per_row_initiator", "4"))
-    keyboard = [initiators[i:i + cols] for i in range(0, len(initiators), cols)]
+    keyboard = [initiators[i : i + cols] for i in range(0, len(initiators), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
         "👤 <b>Шаг 4/7:</b> Выберите инициатора:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return INITIATOR
 
@@ -354,11 +408,11 @@ async def set_initiator(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✍️ Введите имя инициатора:",
             reply_markup=CANCEL_KEYBOARD,
-            parse_mode='HTML'
+            parse_mode="HTML",
         )
         return INITIATOR_CUSTOM
 
-    context.user_data['initiator'] = initiator
+    context.user_data["initiator"] = initiator
 
     try:
         lists = get_all_lists()
@@ -367,19 +421,19 @@ async def set_initiator(update: Update, context: ContextTypes.DEFAULT_TYPE):
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
     cols = int(get_setting("buttons_per_row_object", "2"))
-    keyboard = [objects[i:i + cols] for i in range(0, len(objects), cols)]
+    keyboard = [objects[i : i + cols] for i in range(0, len(objects), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
         "🏗️ <b>Шаг 5/6:</b> Выберите объект:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return OBJECT
 
 
 async def set_initiator_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет кастомное имя инициатора и переходит к объектам"""
-    context.user_data['initiator'] = update.message.text.strip()
+    context.user_data["initiator"] = update.message.text.strip()
 
     try:
         lists = get_all_lists()
@@ -388,12 +442,12 @@ async def set_initiator_custom(update: Update, context: ContextTypes.DEFAULT_TYP
         objects = ["Солнечное", "Привилегия", "Не указан"]
 
     cols = int(get_setting("buttons_per_row_object", "2"))
-    keyboard = [objects[i:i + cols] for i in range(0, len(objects), cols)]
+    keyboard = [objects[i : i + cols] for i in range(0, len(objects), cols)]
     keyboard.append(["❌ Отмена"])
     await update.message.reply_text(
         "🏗️ <b>Шаг 5/6:</b> Выберите объект:",
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return OBJECT
 
@@ -406,28 +460,28 @@ async def set_object(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "✍️ Введите название объекта:",
             reply_markup=CANCEL_KEYBOARD,
-            parse_mode='HTML'
+            parse_mode="HTML",
         )
         return OBJECT_CUSTOM
 
-    context.user_data['object'] = obj
+    context.user_data["object"] = obj
 
     await update.message.reply_text(
         "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
         reply_markup=CANCEL_KEYBOARD,
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return NOTES
 
 
 async def set_object_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет кастомное название объекта и переходит к примечанию"""
-    context.user_data['object'] = update.message.text.strip()
+    context.user_data["object"] = update.message.text.strip()
 
     await update.message.reply_text(
         "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
         reply_markup=CANCEL_KEYBOARD,
-        parse_mode='HTML'
+        parse_mode="HTML",
     )
     return NOTES
 
@@ -438,8 +492,8 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if notes == "-":
         notes = ""
 
-    context.user_data['notes'] = notes
-    context.user_data['photos'] = []
+    context.user_data["notes"] = notes
+    context.user_data["photos"] = []
 
     keyboard = ReplyKeyboardMarkup(
         [["➡️ Пропустить", "❌ Отмена"]],
@@ -450,7 +504,7 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
         "📷 <b>Шаг 7/7:</b> Прикрепите фото (несколько штук)\n"
         "или нажмите <b>➡️ Пропустить</b>:",
         reply_markup=keyboard,
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return PHOTO
 
@@ -458,9 +512,9 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет file_id полученного фото"""
     photo = update.message.photo[-1]  # берём самое большое фото
-    context.user_data.setdefault('photos', []).append(photo.file_id)
+    context.user_data.setdefault("photos", []).append(photo.file_id)
 
-    count = len(context.user_data['photos'])
+    count = len(context.user_data["photos"])
 
     keyboard = ReplyKeyboardMarkup(
         [["✅ Готово", "❌ Отмена"]],
@@ -471,7 +525,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"📷 Фото получено ({count} шт.).\n"
         "Отправьте ещё или нажмите <b>✅ Готово</b>:",
         reply_markup=keyboard,
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return PHOTO
 
@@ -486,8 +540,8 @@ async def handle_photo_hint(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Завершает шаг фото и показывает сводку"""
-    notes = context.user_data.get('notes', '')
-    photos = context.user_data.get('photos', [])
+    notes = context.user_data.get("notes", "")
+    photos = context.user_data.get("photos", [])
     photo_text = f"📎 Фото: {len(photos)} шт." if photos else "📎 Фото: нет"
 
     summary = (
@@ -502,11 +556,10 @@ async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = ReplyKeyboardMarkup(
-        [["✅ Подтвердить", "❌ Отмена"]],
-        resize_keyboard=True
+        [["✅ Подтвердить", "❌ Отмена"]], resize_keyboard=True
     )
 
-    await update.message.reply_text(summary, reply_markup=keyboard, parse_mode='HTML')
+    await update.message.reply_text(summary, reply_markup=keyboard, parse_mode="HTML")
     return CONFIRM
 
 
@@ -518,8 +571,7 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "❌ Отмена":
         context.user_data.clear()
         await update.message.reply_text(
-            "❌ Заявка отменена.",
-            reply_markup=get_main_keyboard(user_id)
+            "❌ Заявка отменена.", reply_markup=get_main_keyboard(user_id)
         )
         return ConversationHandler.END
 
@@ -535,15 +587,15 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     today = date.today()
 
     try:
-        photos = context.user_data.get('photos', [])
+        photos = context.user_data.get("photos", [])
         request_id = add_request_with_photos(
-            name=context.user_data['name'],
-            quantity=float(context.user_data['quantity'].replace(",", ".")),
-            unit=context.user_data['unit'],
+            name=context.user_data["name"],
+            quantity=float(context.user_data["quantity"].replace(",", ".")),
+            unit=context.user_data["unit"],
             request_date=today,
-            initiator=context.user_data['initiator'],
-            object_name=context.user_data['object'],
-            notes=context.user_data['notes'],
+            initiator=context.user_data["initiator"],
+            object_name=context.user_data["object"],
+            notes=context.user_data["notes"],
             photo_file_ids=photos,
         )
 
@@ -560,9 +612,7 @@ async def confirm_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
             summary += f"\n{photo_text}"
 
         await update.message.reply_text(
-            summary,
-            reply_markup=get_main_keyboard(user_id),
-            parse_mode='HTML'
+            summary, reply_markup=get_main_keyboard(user_id), parse_mode="HTML"
         )
         context.user_data.clear()
 
@@ -587,8 +637,7 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
 
     await update.message.reply_text(
-        "❌ Операция отменена.",
-        reply_markup=get_main_keyboard(user_id)
+        "❌ Операция отменена.", reply_markup=get_main_keyboard(user_id)
     )
     return ConversationHandler.END
 
@@ -625,12 +674,17 @@ async def analysis_filter_handler(update: Update, context: ContextTypes.DEFAULT_
         result, ids_with_photos = build_report(mode=mode)
         keyboard = _build_photo_keyboard(ids_with_photos)
         await send_long_message(
-            context, query.message.chat_id, result,
-            parse_mode='HTML', reply_markup=keyboard,
+            context,
+            query.message.chat_id,
+            result,
+            parse_mode="HTML",
+            reply_markup=keyboard,
         )
     except Exception as e:
         logger.error(f"Ошибка формирования отчёта: {e}", exc_info=True)
-        await query.message.reply_text("❌ Ошибка при формировании отчёта. Попробуйте позже.")
+        await query.message.reply_text(
+            "❌ Ошибка при формировании отчёта. Попробуйте позже."
+        )
 
     return ConversationHandler.END
 
@@ -657,7 +711,7 @@ async def complete_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "✅ <b>Завершение заявки</b>\n\nВыберите заявку:",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return COMPLETE_SELECT
 
@@ -697,7 +751,7 @@ async def complete_select_handler(update: Update, context: ContextTypes.DEFAULT_
     await query.edit_message_text(
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return COMPLETE_CONFIRM
 
@@ -734,14 +788,14 @@ async def complete_confirm_handler(update: Update, context: ContextTypes.DEFAULT
         f"📅 Выполнено: {today.strftime('%d.%m')}"
     )
 
-    await query.edit_message_text(notification, parse_mode='HTML')
+    await query.edit_message_text(notification, parse_mode="HTML")
 
     # Уведомление в общий чат
     try:
         await context.bot.send_message(
             chat_id=int(TELEGRAM_CHAT_ID),
             text=notification,
-            parse_mode='HTML',
+            parse_mode="HTML",
             disable_web_page_preview=True,
         )
     except Exception as e:
@@ -756,11 +810,13 @@ async def complete_confirm_handler(update: Update, context: ContextTypes.DEFAULT
                 await context.bot.send_message(
                     chat_id=tg_id,
                     text=notification,
-                    parse_mode='HTML',
+                    parse_mode="HTML",
                     disable_web_page_preview=True,
                 )
             except Exception as e:
-                logger.warning(f"Не удалось отправить ЛС инициатору {initiator_name}: {e}")
+                logger.warning(
+                    f"Не удалось отправить ЛС инициатору {initiator_name}: {e}"
+                )
 
     context.user_data.pop("complete_request", None)
     return ConversationHandler.END
@@ -789,7 +845,7 @@ async def admin_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "⚙️ <b>Настройки</b>\n\nВыберите раздел:",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ADMIN_MENU
 
@@ -805,7 +861,7 @@ async def _show_main_settings(query):
     await query.edit_message_text(
         "⚙️ <b>Настройки</b>\n\nВыберите раздел:",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ADMIN_MENU
 
@@ -830,7 +886,9 @@ async def admin_menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return await _show_list(update, context, list_type)
 
 
-async def _show_list(update: Update, context: ContextTypes.DEFAULT_TYPE, list_type: str):
+async def _show_list(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, list_type: str
+):
     """Показывает значения справочника с inline-кнопками"""
     query = update.callback_query
     lists = get_all_lists()
@@ -848,21 +906,27 @@ async def _show_list(update: Update, context: ContextTypes.DEFAULT_TYPE, list_ty
         if v == "Другое":
             continue
         safe_v = _truncate_callback_data("rename:", v)
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"),
-            InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
-        ])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"
+                ),
+                InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
+            ]
+        )
     keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="add")])
 
     bpr_key = f"buttons_per_row_{list_type}"
     cols = int(get_setting(bpr_key, "2"))
-    keyboard.append([InlineKeyboardButton(f"🔢 В строке: {cols}", callback_data="set_bpr")])
+    keyboard.append(
+        [InlineKeyboardButton(f"🔢 В строке: {cols}", callback_data="set_bpr")]
+    )
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_main")])
 
     await query.edit_message_text(
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ADMIN_LIST_VIEW
 
@@ -879,7 +943,7 @@ async def admin_list_view_handler(update: Update, context: ContextTypes.DEFAULT_
     if data == "add":
         await query.edit_message_text(
             f"✍️ Введите новое значение для <b>{LIST_TYPE_LABELS.get(list_type, list_type)}</b>:",
-            parse_mode='HTML',
+            parse_mode="HTML",
         )
         return ADMIN_ADD_VALUE
 
@@ -888,7 +952,7 @@ async def admin_list_view_handler(update: Update, context: ContextTypes.DEFAULT_
         context.user_data["admin_rename_old"] = old_value
         await query.edit_message_text(
             f"✏️ Текущее значение: <b>{escape(old_value)}</b>\n\nВведите новое название:",
-            parse_mode='HTML',
+            parse_mode="HTML",
         )
         return ADMIN_RENAME_NEW
 
@@ -903,7 +967,7 @@ async def admin_list_view_handler(update: Update, context: ContextTypes.DEFAULT_
         await query.edit_message_text(
             f"🗑 Удалить <b>{escape(value)}</b>?",
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode='HTML',
+            parse_mode="HTML",
         )
         return ADMIN_DELETE
 
@@ -913,7 +977,9 @@ async def admin_list_view_handler(update: Update, context: ContextTypes.DEFAULT_
         keyboard = []
         for n in range(1, 7):
             marker = " ✅" if n == current else ""
-            keyboard.append(InlineKeyboardButton(f"{n}{marker}", callback_data=f"bpr:{n}"))
+            keyboard.append(
+                InlineKeyboardButton(f"{n}{marker}", callback_data=f"bpr:{n}")
+            )
         await query.edit_message_text(
             "🔢 Сколько кнопок в строке?",
             reply_markup=InlineKeyboardMarkup([keyboard]),
@@ -935,14 +1001,20 @@ async def admin_rename_new_handler(update: Update, context: ContextTypes.DEFAULT
     list_type = context.user_data.get("admin_list_type", "object")
 
     if not new_value:
-        await update.message.reply_text("❌ Значение не может быть пустым. Попробуйте ещё раз:")
+        await update.message.reply_text(
+            "❌ Значение не может быть пустым. Попробуйте ещё раз:"
+        )
         return ADMIN_RENAME_NEW
 
     success = rename_list_value(list_type, old_value, new_value)
     if success:
-        await update.message.reply_text(f"✅ Переименовано: {escape(old_value)} → {escape(new_value)}")
+        await update.message.reply_text(
+            f"✅ Переименовано: {escape(old_value)} → {escape(new_value)}"
+        )
     else:
-        await update.message.reply_text("❌ Не удалось переименовать (возможно, дубликат).")
+        await update.message.reply_text(
+            "❌ Не удалось переименовать (возможно, дубликат)."
+        )
 
     return await _show_list_msg(update, context, list_type)
 
@@ -972,19 +1044,25 @@ async def admin_add_value_handler(update: Update, context: ContextTypes.DEFAULT_
     list_type = context.user_data.get("admin_list_type", "object")
 
     if not new_value:
-        await update.message.reply_text("❌ Значение не может быть пустым. Попробуйте ещё раз:")
+        await update.message.reply_text(
+            "❌ Значение не может быть пустым. Попробуйте ещё раз:"
+        )
         return ADMIN_ADD_VALUE
 
     success = add_list_value(list_type, new_value)
     if success:
         await update.message.reply_text(f"✅ Добавлено: {escape(new_value)}")
     else:
-        await update.message.reply_text(f"⚠️ Значение «{escape(new_value)}» уже существует.")
+        await update.message.reply_text(
+            f"⚠️ Значение «{escape(new_value)}» уже существует."
+        )
 
     return await _show_list_msg(update, context, list_type)
 
 
-async def admin_buttons_edit_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def admin_buttons_edit_handler(
+    update: Update, context: ContextTypes.DEFAULT_TYPE
+):
     """Устанавливает количество кнопок в строке"""
     if not is_admin(update.effective_user.id):
         return ConversationHandler.END
@@ -1022,12 +1100,14 @@ async def admin_buttons_show(update: Update, context: ContextTypes.DEFAULT_TYPE)
     await query.edit_message_text(
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ADMIN_MENU
 
 
-async def _show_list_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, list_type: str):
+async def _show_list_msg(
+    update: Update, context: ContextTypes.DEFAULT_TYPE, list_type: str
+):
     """Показывает справочник через обычное сообщение (не callback)"""
     lists = get_all_lists()
     values = lists.get(list_type, [])
@@ -1044,21 +1124,27 @@ async def _show_list_msg(update: Update, context: ContextTypes.DEFAULT_TYPE, lis
         if v == "Другое":
             continue
         safe_v = _truncate_callback_data("rename:", v)
-        keyboard.append([
-            InlineKeyboardButton(f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"),
-            InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
-        ])
+        keyboard.append(
+            [
+                InlineKeyboardButton(
+                    f"✏️ {escape(v)}", callback_data=f"rename:{safe_v}"
+                ),
+                InlineKeyboardButton(f"🗑", callback_data=f"del:{safe_v}"),
+            ]
+        )
     keyboard.append([InlineKeyboardButton("➕ Добавить", callback_data="add")])
 
     bpr_key = f"buttons_per_row_{list_type}"
     cols = int(get_setting(bpr_key, "2"))
-    keyboard.append([InlineKeyboardButton(f"🔢 В строке: {cols}", callback_data="set_bpr")])
+    keyboard.append(
+        [InlineKeyboardButton(f"🔢 В строке: {cols}", callback_data="set_bpr")]
+    )
     keyboard.append([InlineKeyboardButton("⬅️ Назад", callback_data="back_main")])
 
     await update.message.reply_text(
         text,
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode='HTML',
+        parse_mode="HTML",
     )
     return ADMIN_LIST_VIEW
 
@@ -1083,13 +1169,13 @@ async def handle_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if text == "⛔ Выход":
         await update.message.reply_text(
             "👋 До встречи! Для возврата введите /start",
-            reply_markup=ReplyKeyboardMarkup([["/start"]], resize_keyboard=True)
+            reply_markup=ReplyKeyboardMarkup([["/start"]], resize_keyboard=True),
         )
 
     else:
         await update.message.reply_text(
             "Используйте кнопки меню или /start",
-            reply_markup=get_main_keyboard(user_id)
+            reply_markup=get_main_keyboard(user_id),
         )
 
 
@@ -1111,86 +1197,102 @@ def main():
 
     conv_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex('^➕ Добавить заявку$'), start_add_request)
+            MessageHandler(filters.Regex("^➕ Добавить заявку$"), start_add_request)
         ],
         states={
             NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_name)],
             QUANTITY: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_quantity)],
             UNIT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_unit)],
             INITIATOR: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_initiator)],
-            INITIATOR_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_initiator_custom)],
+            INITIATOR_CUSTOM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_initiator_custom)
+            ],
             OBJECT: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_object)],
-            OBJECT_CUSTOM: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_object_custom)],
-            NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_notes_and_save)],
+            OBJECT_CUSTOM: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_object_custom)
+            ],
+            NOTES: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, set_notes_and_save)
+            ],
             PHOTO: [
                 MessageHandler(filters.PHOTO, handle_photo),
-                MessageHandler(filters.Regex('^✅ Готово$'), handle_photo_done),
-                MessageHandler(filters.Regex('^➡️ Пропустить$'), handle_photo_done),
-                MessageHandler(filters.Regex('^❌ Отмена$'), cancel),
+                MessageHandler(filters.Regex("^✅ Готово$"), handle_photo_done),
+                MessageHandler(filters.Regex("^➡️ Пропустить$"), handle_photo_done),
+                MessageHandler(filters.Regex("^❌ Отмена$"), cancel),
                 MessageHandler(filters.ALL & ~filters.COMMAND, handle_photo_hint),
             ],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_request)],
         },
         fallbacks=[
-            CommandHandler('cancel', cancel),
-            MessageHandler(filters.Regex('^❌ Отмена$'), cancel),
+            CommandHandler("cancel", cancel),
+            MessageHandler(filters.Regex("^❌ Отмена$"), cancel),
         ],
     )
 
     admin_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex('Настройки'), admin_start)
-        ],
+        entry_points=[MessageHandler(filters.Regex("Настройки"), admin_start)],
         states={
             ADMIN_MENU: [CallbackQueryHandler(admin_menu_handler)],
             ADMIN_LIST_VIEW: [CallbackQueryHandler(admin_list_view_handler)],
-            ADMIN_RENAME_NEW: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_rename_new_handler)],
+            ADMIN_RENAME_NEW: [
+                MessageHandler(
+                    filters.TEXT & ~filters.COMMAND, admin_rename_new_handler
+                )
+            ],
             ADMIN_DELETE: [CallbackQueryHandler(admin_delete_handler)],
-            ADMIN_ADD_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_value_handler)],
+            ADMIN_ADD_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, admin_add_value_handler)
+            ],
             ADMIN_BUTTONS_EDIT: [CallbackQueryHandler(admin_buttons_edit_handler)],
         },
         fallbacks=[
-            CommandHandler('cancel', admin_cancel),
-            MessageHandler(filters.Regex('^❌ Отмена$'), admin_cancel),
-            MessageHandler(filters.Regex('Настройки'), admin_start),
+            CommandHandler("cancel", admin_cancel),
+            MessageHandler(filters.Regex("^❌ Отмена$"), admin_cancel),
+            MessageHandler(filters.Regex("Настройки"), admin_start),
         ],
     )
 
     analysis_handler = ConversationHandler(
-        entry_points=[
-            MessageHandler(filters.Regex('^📊 Анализ$'), analysis_start)
-        ],
+        entry_points=[MessageHandler(filters.Regex("^📊 Анализ$"), analysis_start)],
         states={
-            0: [CallbackQueryHandler(analysis_filter_handler, pattern=r'^report:(active|completed)$')],
+            0: [
+                CallbackQueryHandler(
+                    analysis_filter_handler, pattern=r"^report:(active|completed)$"
+                )
+            ],
         },
         fallbacks=[
-            CommandHandler('cancel', cancel),
+            CommandHandler("cancel", cancel),
         ],
     )
 
     complete_handler = ConversationHandler(
         entry_points=[
-            MessageHandler(filters.Regex('^✅ Завершить заявку$'), complete_start)
+            MessageHandler(filters.Regex("^✅ Завершить заявку$"), complete_start)
         ],
         states={
-            COMPLETE_SELECT: [CallbackQueryHandler(complete_select_handler, pattern=r'^cr:\d+$')],
-            COMPLETE_CONFIRM: [CallbackQueryHandler(complete_confirm_handler, pattern=r'^cr:(confirm|cancel)$')],
+            COMPLETE_SELECT: [
+                CallbackQueryHandler(complete_select_handler, pattern=r"^cr:\d+$")
+            ],
+            COMPLETE_CONFIRM: [
+                CallbackQueryHandler(
+                    complete_confirm_handler, pattern=r"^cr:(confirm|cancel)$"
+                )
+            ],
         },
         fallbacks=[
-            CommandHandler('cancel', cancel),
-            MessageHandler(filters.Regex('^❌ Отмена$'), cancel),
+            CommandHandler("cancel", cancel),
+            MessageHandler(filters.Regex("^❌ Отмена$"), cancel),
         ],
     )
 
     register_conv = ConversationHandler(
-        entry_points=[
-            CommandHandler("start", start)
-        ],
+        entry_points=[CommandHandler("start", start)],
         states={
             REG_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, register_name)],
         },
         fallbacks=[
-            CommandHandler('cancel', cancel),
+            CommandHandler("cancel", cancel),
         ],
     )
 
@@ -1200,7 +1302,7 @@ def main():
     app.add_handler(complete_handler)
     app.add_handler(admin_handler)
     app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(show_request_photos, pattern=r'^photos:\d+$'))
+    app.add_handler(CallbackQueryHandler(show_request_photos, pattern=r"^photos:\d+$"))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_menu))
 
     app.job_queue.run_daily(
@@ -1210,7 +1312,9 @@ def main():
         name="daily_report",
     )
 
-    logger.info(f" Бот запущен. Отчёт ежедневно в {REPORT_HOUR:02d}:{REPORT_MINUTE:02d}")
+    logger.info(
+        f" Бот запущен. Отчёт ежедневно в {REPORT_HOUR:02d}:{REPORT_MINUTE:02d}"
+    )
     app.run_polling()
 
 

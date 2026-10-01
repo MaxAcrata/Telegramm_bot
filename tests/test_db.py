@@ -1,4 +1,5 @@
 """Тесты для db.py"""
+
 import pytest
 import tempfile
 import os
@@ -6,7 +7,17 @@ from datetime import date
 from unittest.mock import patch
 
 import db
-from db import get_conn, init_db, add_request, get_active_requests, get_all_lists, add_list_value, add_request_photo, get_request_photos, get_photo_counts
+from db import (
+    get_conn,
+    init_db,
+    add_request,
+    get_active_requests,
+    get_all_lists,
+    add_list_value,
+    add_request_photo,
+    get_request_photos,
+    get_photo_counts,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -21,9 +32,12 @@ def temp_db(tmp_path):
 def test_init_db_creates_tables():
     """Таблицы создаются при инициализации"""
     with get_conn() as conn:
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        ]
         assert "requests" in tables
         assert "lists" in tables
 
@@ -112,9 +126,12 @@ def test_add_list_value_duplicate():
 def test_init_db_creates_photos_table():
     """Таблица request_photos создаётся при инициализации"""
     with get_conn() as conn:
-        tables = [r[0] for r in conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        ).fetchall()]
+        tables = [
+            r[0]
+            for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        ]
         assert "request_photos" in tables
 
 

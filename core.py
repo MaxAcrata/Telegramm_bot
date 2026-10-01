@@ -11,7 +11,7 @@ logger = logging.getLogger(__name__)
 # Регулярное выражение для поиска URLs
 _URL_PATTERN = re.compile(
     r'https?://[^\s<>"\')\]]+|'  # http:// или https://
-    r'www\.[^\s<>"\')\]]+'       # www.
+    r'www\.[^\s<>"\')\]]+'  # www.
 )
 
 
@@ -193,18 +193,21 @@ def _build_active_report(today: date, save_to_file: bool) -> tuple:
     # Статистика
     ordered = [t for t in active_tasks if "заказ" in (t.get("notes") or "").lower()]
     overdue = [
-        t for t in active_tasks
+        t
+        for t in active_tasks
         if t.get("request_date")
         and date.fromisoformat(t["request_date"]) < today - timedelta(days=OVERDUE_DAYS)
     ]
 
-    report.extend([
-        f" Заказано: <b>{len(ordered)}</b>",
-        f" Не заказано: <b>{len(active_tasks) - len(ordered)}</b>",
-        f" Просрочено (&gt;{OVERDUE_DAYS} дн.): <b>{len(overdue)}</b>",
-        "━━━━━━━━━━━━━━━━━━━━",
-        ""
-    ])
+    report.extend(
+        [
+            f" Заказано: <b>{len(ordered)}</b>",
+            f" Не заказано: <b>{len(active_tasks) - len(ordered)}</b>",
+            f" Просрочено (&gt;{OVERDUE_DAYS} дн.): <b>{len(overdue)}</b>",
+            "━━━━━━━━━━━━━━━━━━━━",
+            "",
+        ]
+    )
 
     # Группировка по объектам
     from itertools import groupby
@@ -225,13 +228,17 @@ def _build_active_report(today: date, save_to_file: bool) -> tuple:
 
     # Раздел просроченных заявок по инициаторам
     if overdue:
-        report.extend([
-            "",
-            " <b>⚠️ ПРОСРОЧЕННЫЕ ЗАЯВКИ</b>",
-            "━━━━━━━━━━━━━━━━━━━━",
-        ])
+        report.extend(
+            [
+                "",
+                " <b>⚠️ ПРОСРОЧЕННЫЕ ЗАЯВКИ</b>",
+                "━━━━━━━━━━━━━━━━━━━━",
+            ]
+        )
         sorted_overdue = sorted(overdue, key=lambda t: t.get("initiator", ""))
-        for initiator, group_iter in groupby(sorted_overdue, key=lambda t: t.get("initiator", "")):
+        for initiator, group_iter in groupby(
+            sorted_overdue, key=lambda t: t.get("initiator", "")
+        ):
             group = list(group_iter)
             report.append(f"\n 👤 <b>{escape(initiator)}</b> — {len(group)} шт.")
             for task in group:

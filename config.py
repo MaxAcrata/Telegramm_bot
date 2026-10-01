@@ -9,8 +9,11 @@ def _require_env(name: str) -> str:
     """Возвращает значение обязательной переменной или завершает процесс."""
     value = os.getenv(name)
     if not value:
-        print(f"❌ Обязательная переменная окружения {name} не задана. "
-              f"Добавьте её в .env", file=sys.stderr)
+        print(
+            f"❌ Обязательная переменная окружения {name} не задана. "
+            f"Добавьте её в .env",
+            file=sys.stderr,
+        )
         sys.exit(1)
     return value
 
