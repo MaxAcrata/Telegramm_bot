@@ -468,9 +468,12 @@ async def set_object(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     context.user_data["object"] = obj
 
+    notes_keyboard = ReplyKeyboardMarkup(
+        [["➡️ Пропустить", "❌ Отмена"]], resize_keyboard=True
+    )
     await update.message.reply_text(
-        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
-        reply_markup=CANCEL_KEYBOARD,
+        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы):",
+        reply_markup=notes_keyboard,
         parse_mode="HTML",
     )
     return NOTES
@@ -480,9 +483,12 @@ async def set_object_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет кастомное название объекта и переходит к примечанию"""
     context.user_data["object"] = update.message.text.strip()
 
+    notes_keyboard = ReplyKeyboardMarkup(
+        [["➡️ Пропустить", "❌ Отмена"]], resize_keyboard=True
+    )
     await update.message.reply_text(
-        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы) или отправьте <code>-</code> для пропуска:",
-        reply_markup=CANCEL_KEYBOARD,
+        "📝 <b>Шаг 6/7:</b> Добавьте примечание (ссылки допустимы):",
+        reply_markup=notes_keyboard,
         parse_mode="HTML",
     )
     return NOTES
@@ -491,7 +497,7 @@ async def set_object_custom(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Сохраняет примечание и переходит к шагу фото"""
     notes = update.message.text.strip()
-    if notes == "-":
+    if notes in ("-", "➡️ Пропустить"):
         notes = ""
 
     context.user_data["notes"] = notes
