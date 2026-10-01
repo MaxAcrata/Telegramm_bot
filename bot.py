@@ -433,12 +433,14 @@ async def set_notes_and_save(update: Update, context: ContextTypes.DEFAULT_TYPE)
     context.user_data['notes'] = notes
     context.user_data['photos'] = []
 
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("➡️ Пропустить", callback_data="photo:done")]
-    ])
+    keyboard = ReplyKeyboardMarkup(
+        [["➡️ Пропустить", "❌ Отмена"]],
+        resize_keyboard=True,
+    )
 
     await update.message.reply_text(
-        "📷 <b>Шаг 7/7:</b> Прикрепите фото (несколько штук) или нажмите ➡️ Пропустить:",
+        "📷 <b>Шаг 7/7:</b> Прикрепите фото (несколько штук)\n"
+        "или нажмите <b>➡️ Пропустить</b>:",
         reply_markup=keyboard,
         parse_mode='HTML',
     )
@@ -451,23 +453,23 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.setdefault('photos', []).append(photo.file_id)
 
     count = len(context.user_data['photos'])
-    keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"✅ Готово ({count} шт.)", callback_data="photo:done")],
-    ])
+
+    keyboard = ReplyKeyboardMarkup(
+        [["✅ Готово", "❌ Отмена"]],
+        resize_keyboard=True,
+    )
 
     await update.message.reply_text(
         f"📷 Фото получено ({count} шт.).\n"
-        "Отправьте ещё или нажмите ✅ Готово:",
+        "Отправьте ещё или нажмите <b>✅ Готово</b>:",
         reply_markup=keyboard,
+        parse_mode='HTML',
     )
     return PHOTO
 
 
 async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Завершает шаг фото и показывает сводку"""
-    query = update.callback_query
-    await query.answer()
-
     notes = context.user_data.get('notes', '')
     photos = context.user_data.get('photos', [])
     photo_text = f"📎 Фото: {len(photos)} шт." if photos else "📎 Фото: нет"
@@ -488,7 +490,7 @@ async def handle_photo_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
         resize_keyboard=True
     )
 
-    await query.message.reply_text(summary, reply_markup=keyboard, parse_mode='HTML')
+    await update.message.reply_text(summary, reply_markup=keyboard, parse_mode='HTML')
     return CONFIRM
 
 
@@ -1101,7 +1103,9 @@ def main():
             NOTES: [MessageHandler(filters.TEXT & ~filters.COMMAND, set_notes_and_save)],
             PHOTO: [
                 MessageHandler(filters.PHOTO, handle_photo),
-                CallbackQueryHandler(handle_photo_done, pattern=r'^photo:done$'),
+                MessageHandler(filters.Regex('^✅ Готово$'), handle_photo_done),
+                MessageHandler(filters.Regex('^➡️ Пропустить$'), handle_photo_done),
+                MessageHandler(filters.Regex('^❌ Отмена$'), cancel),
             ],
             CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, confirm_request)],
         },

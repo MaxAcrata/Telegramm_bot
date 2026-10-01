@@ -162,6 +162,7 @@ async def test_set_notes_shows_confirmation():
     assert context.user_data["photos"] == []
     reply_text = update.message.reply_text.call_args[0][0]
     assert "Шаг 7/7" in reply_text
+    assert "Пропустить" in reply_text
 
 
 @pytest.mark.asyncio
