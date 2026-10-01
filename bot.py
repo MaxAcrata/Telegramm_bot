@@ -75,14 +75,15 @@ def get_main_keyboard(user_id: int) -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
 
 
-async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, parse_mode: str = None):
+async def send_long_message(context: ContextTypes.DEFAULT_TYPE, chat_id: int, text: str, parse_mode: str = None, disable_web_page_preview: bool = True):
     """Отправляет длинное сообщение по частям"""
     parts = split_message(text)
     for part in parts:
         await context.bot.send_message(
             chat_id=chat_id,
             text=part,
-            parse_mode=parse_mode
+            parse_mode=parse_mode,
+            disable_web_page_preview=disable_web_page_preview
         )
 
 
@@ -508,7 +509,7 @@ async def analysis_filter_handler(update: Update, context: ContextTypes.DEFAULT_
 
     try:
         result = build_report(mode=mode)
-        await query.message.reply_text(result, parse_mode='HTML')
+        await query.message.reply_text(result, parse_mode='HTML', disable_web_page_preview=True)
     except Exception as e:
         logger.error(f"Ошибка формирования отчёта: {e}", exc_info=True)
         await query.message.reply_text("❌ Ошибка при формировании отчёта. Попробуйте позже.")
@@ -623,6 +624,7 @@ async def complete_confirm_handler(update: Update, context: ContextTypes.DEFAULT
             chat_id=int(TELEGRAM_CHAT_ID),
             text=notification,
             parse_mode='HTML',
+            disable_web_page_preview=True,
         )
     except Exception as e:
         logger.warning(f"Не удалось отправить уведомление в чат: {e}")
@@ -637,6 +639,7 @@ async def complete_confirm_handler(update: Update, context: ContextTypes.DEFAULT
                     chat_id=tg_id,
                     text=notification,
                     parse_mode='HTML',
+                    disable_web_page_preview=True,
                 )
             except Exception as e:
                 logger.warning(f"Не удалось отправить ЛС инициатору {initiator_name}: {e}")
